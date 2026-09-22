@@ -1,0 +1,23 @@
+# Зависимости
+node_modules
+
+# Сборка
+dist
+coverage
+.vitest
+
+# Кэш TypeScript
+*.tsbuildinfo
+
+# Lock-файлы — их формат контролируется пакетным менеджером
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+
+# Сайт документации (когда появится)
+docs/.docusaurus
+docs/build
+
+# Файл изменений ведётся вручную, форматирование не трогаем
+CHANGELOG.md
+README.md

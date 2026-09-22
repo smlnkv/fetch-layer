@@ -1,0 +1,101 @@
+{
+  "name": "fetch-layer",
+  "version": "0.1.0",
+  "description": "Thin typed HTTP client for browser and Node with composable layers: auth, idempotency, retry. Zero dependencies, ESM only.",
+  "keywords": [
+    "fetch",
+    "http",
+    "api",
+    "client",
+    "typescript",
+    "esm",
+    "auth",
+    "refresh-token",
+    "idempotency",
+    "retry",
+    "layers"
+  ],
+  "license": "MIT",
+  "author": {
+    "name": "smlnkv",
+    "email": "smlnkv79@gmail.com",
+    "url": "https://github.com/smlnkv"
+  },
+  "homepage": "https://github.com/smlnkv/fetch-layer#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/smlnkv/fetch-layer.git"
+  },
+  "bugs": {
+    "url": "https://github.com/smlnkv/fetch-layer/issues"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20.6"
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    },
+    "./layers": {
+      "types": "./dist/layers/index.d.mts",
+      "import": "./dist/layers/index.mjs"
+    },
+    "./auth": {
+      "types": "./dist/layers/auth/index.d.mts",
+      "import": "./dist/layers/auth/index.mjs"
+    },
+    "./idempotency": {
+      "types": "./dist/layers/idempotency/index.d.mts",
+      "import": "./dist/layers/idempotency/index.mjs"
+    },
+    "./retry": {
+      "types": "./dist/layers/retry/index.d.mts",
+      "import": "./dist/layers/retry/index.mjs"
+    },
+    "./storage": {
+      "types": "./dist/shared/storage.d.mts",
+      "import": "./dist/shared/storage.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src tests",
+    "lint:fix": "eslint src tests --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "prepublishOnly": "npm run typecheck && npm run lint && npm run test && npm run build"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^22.10.0",
+    "@typescript-eslint/eslint-plugin": "^8.69.0",
+    "@typescript-eslint/parser": "^8.69.0",
+    "@vitest/coverage-v8": "^5.0.0",
+    "eslint": "^10.9.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-import-x": "^4.17.1",
+    "globals": "^17.12.0",
+    "msw": "^2.15.0",
+    "prettier": "^3.9.6",
+    "tsdown": "^0.22.3",
+    "typescript": "^6.0.0",
+    "vitest": "^5.0.0"
+  }
+}
