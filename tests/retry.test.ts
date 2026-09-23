@@ -223,7 +223,7 @@ describe('retry - retryOnNetwork и retryOnTimeout', () => {
     expect(attempts2).toBe(2);
   });
 
-  it('shouldRetry приложения пользователя полностью заменяет дефолт', async () => {
+  it('shouldRetry приложения полностью заменяет дефолт', async () => {
     // Пользовательский shouldRetry не композируется с retryOnNetwork
     // и retryOnTimeout. Он получает ApiError и решает сам.
     let attempts = 0;
@@ -598,6 +598,25 @@ describe('retry - warnOnUnsafeRetry', () => {
         warnOnUnsafeRetry: true,
       });
       await expect(client3.get('/users')).rejects.toBeDefined();
+
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('не предупреждает при skipIdempotency: true', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const mock = createMockFetch(() => ({ status: 500, body: {} }));
+      const client = createRetryClient({
+        fetch: mock.fetch,
+        maxAttempts: 2,
+        sleep: noSleep,
+        warnOnUnsafeRetry: true,
+      });
+
+      await expect(client.post('/orders', {}, { skipIdempotency: true })).rejects.toBeDefined();
 
       expect(warn).not.toHaveBeenCalled();
     } finally {

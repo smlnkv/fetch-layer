@@ -41,8 +41,11 @@ export interface RetryOptions {
 
   /**
    * Предупреждать о повторе мутирующего запроса без заголовка
-   * идемпотентности. По умолчанию true. На поведение не влияет,
-   * только выводит предупреждение один раз на пару (method, path).
+   * идемпотентности. По умолчанию true.
+   *
+   * Предупреждение не выводится, если приложение задало заголовок
+   * само или передало skipIdempotency: true. Выводится один раз
+   * на пару (method, path).
    */
   warnOnUnsafeRetry?: boolean;
 
@@ -141,7 +144,7 @@ export function withRetry(options: RetryOptions = {}): Layer {
   const shouldRetry = options.shouldRetry ?? defaultShouldRetry;
 
   /**
-   * attempt с 1: первый повтор даёт базовую задержку, второй -
+   * Начинается с 1: первый повтор даёт базовую задержку, второй -
    * удвоенную.
    */
   const defaultCompute = (attempt: number): number => {
@@ -178,9 +181,14 @@ export function withRetry(options: RetryOptions = {}): Layer {
         const hasIdempotencyKey =
           getHeader(initialConfig.headers, idempotencyHeaderName) !== undefined;
 
-        // Предупреждение относится к конфигурации, а не к факту
-        // повтора, поэтому проверяем до первой попытки.
-        if (warnOnUnsafeRetry && isMutatingMethod(method) && !hasIdempotencyKey) {
+        // Проверяем до первой попытки: предупреждение относится
+        // к конфигурации, а не к факту повтора.
+        if (
+          warnOnUnsafeRetry &&
+          isMutatingMethod(method) &&
+          !hasIdempotencyKey &&
+          !initialConfig.skipIdempotency
+        ) {
           warnUnsafeRetryOnce(
             `retry-unsafe:${method}:${initialConfig.path}`,
             `[fetch-layer] Retry is enabled for ${method} ${initialConfig.path} ` +
