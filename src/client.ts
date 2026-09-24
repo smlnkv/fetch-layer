@@ -75,6 +75,8 @@ export function createClient(options: ClientOptions): Client {
   const { pipeline, states } = applyLayers(baseRequest, layers, context);
 
   const wrapped: RequestFn = async <T>(config: RequestConfig): Promise<T> => {
+    assertNonEmptyString(config.path, 'client: path');
+
     const hooked = runOnRequest(options.hooks, config);
 
     // Нормализуем метод до верхнего регистра: слои (withIdempotency,

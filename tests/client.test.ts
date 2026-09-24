@@ -651,6 +651,18 @@ describe('client - request()', () => {
   });
 });
 
+describe('client - валидация path', () => {
+  it('ошибка до запроса при пустом или нестроковом path', async () => {
+    const mock = createMockFetch(() => ({ body: {} }));
+    const client = createTestClient({ fetch: mock.fetch });
+
+    await expect(client.get('')).rejects.toThrow(/client: path/);
+    await expect(client.get(null as unknown as string)).rejects.toThrow(/client: path/);
+
+    expect(mock.calls).toHaveLength(0);
+  });
+});
+
 describe('createClient - валидация', () => {
   it('ошибка конфигурации при пустом baseUrl или невалидном timeoutMs', () => {
     expect(() => createClient({ baseUrl: '' })).toThrow(/baseUrl/);
