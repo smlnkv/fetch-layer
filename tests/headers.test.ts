@@ -27,6 +27,23 @@ describe('getHeader', () => {
     const headers = Object.create(proto) as Record<string, string>;
     expect(getHeader(headers, 'Content-Type')).toBeUndefined();
   });
+
+  it('читает Headers и массив пар', () => {
+    const h = new Headers();
+    h.set('X-Trace-Id', 'trace-1');
+    expect(getHeader(h, 'x-trace-id')).toBe('trace-1');
+    expect(getHeader(h, 'X-Trace-Id')).toBe('trace-1');
+
+    expect(
+      getHeader(
+        [
+          ['X-A', '1'],
+          ['X-B', '2'],
+        ],
+        'x-b',
+      ),
+    ).toBe('2');
+  });
 });
 
 describe('setHeader', () => {
@@ -98,6 +115,26 @@ describe('mergeHeaders', () => {
     const source = { 'Content-Type': 'text/plain' };
     mergeHeaders(source, { 'Content-Type': 'application/json' });
     expect(source).toEqual({ 'Content-Type': 'text/plain' });
+  });
+
+  it('сливает Headers, Record и массив пар в одном вызове', () => {
+    const h = new Headers();
+    h.set('X-From-Headers', 'h');
+
+    const result = mergeHeaders({ 'X-From-Record': 'r' }, h, [['X-From-Pairs', 'p']]);
+
+    expect(result['X-From-Record']).toBe('r');
+    expect(result['x-from-headers']).toBe('h');
+    expect(result['X-From-Pairs']).toBe('p');
+  });
+
+  it('перезаписывает значение из Headers значением из следующего источника', () => {
+    const h = new Headers();
+    h.set('content-type', 'text/plain');
+
+    const result = mergeHeaders(h, { 'Content-Type': 'application/json' });
+
+    expect(result).toEqual({ 'Content-Type': 'application/json' });
   });
 });
 

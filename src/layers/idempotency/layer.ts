@@ -1,6 +1,6 @@
 import { type ApiError, toApiError } from '../../core/errors';
 import { isMutatingMethod } from '../../shared/method';
-import { getHeader, setHeader } from '../../transport/headers';
+import { getHeader, mergeHeaders, setHeader } from '../../transport/headers';
 
 import type { IdempotencyContext, IdempotencyOutcome, IdempotencySource } from './types';
 import type { Layer, LayerWrapResult } from '../../core/layer';
@@ -50,7 +50,7 @@ export function withIdempotency(
         }
 
         // Пустая строка и whitespace-only считаются "не установлено".
-        const existingKey = config.headers ? getHeader(config.headers, headerName) : undefined;
+        const existingKey = getHeader(config.headers, headerName);
         if (existingKey !== undefined && existingKey.trim() !== '') {
           return next<T>(config);
         }
@@ -72,7 +72,9 @@ export function withIdempotency(
           throw toApiError(e);
         }
 
-        const enrichedHeaders = { ...config.headers };
+        // mergeHeaders нормализует Headers и массив пар к объекту.
+        // Spread для Headers дал бы {}.
+        const enrichedHeaders = mergeHeaders(config.headers);
         setHeader(enrichedHeaders, headerName, key);
 
         const enriched: RequestConfig = {
