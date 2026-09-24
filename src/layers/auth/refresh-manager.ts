@@ -24,24 +24,21 @@ export interface RefreshManagerCallbacks {
 }
 
 /**
- * Менеджер обновления токена. Создаётся один раз в withAuth, живёт
- * вместе с клиентом.
+ * Менеджер обновления токена. Один на клиент.
  *
  * Решает три задачи:
  *
  * 1. Single-flight: параллельные 401 запускают один refresh.
  * 2. Предохранитель: после временного сбоя новые попытки
  *    блокируются на circuitBreakerMs.
- * 3. Cooldown после успешного refresh. Pipeline
- *    idempotency -> retry -> auth может вызвать повторный refresh
- *    в рамках одной операции: refresh успешен, повтор с новым
- *    токеном получил 5xx, retry повторил, снова 401. Без cooldown
- *    это запускает второй refresh.
+ * 3. Cooldown: успешный refresh не повторяется в пределах
+ *    circuitBreakerMs. Pipeline idempotency -> retry -> auth может
+ *    снова получить 401 в рамках одной операции; без cooldown это
+ *    запускает второй refresh.
  *
- * Менеджер не отменяет refresh при отмене ожидающих запросов
- * (refresh короткий, экономия минимальна). Таймаут refresh
- * ограничен refreshTimeoutMs: провайдер получает AbortSignal
- * и может передать его в свой fetch.
+ * Таймаут refresh ограничен refreshTimeoutMs. Вызов завершается
+ * по таймауту, даже если реализация SessionProvider не слушает
+ * переданный signal.
  */
 export class RefreshManager {
   private readonly circuit: CircuitBreaker;
@@ -115,20 +112,28 @@ export class RefreshManager {
     circuitBreakerMs: number,
   ): Promise<RefreshManagerResult> {
     const controller = new AbortController();
-    const timer = setTimeout(
-      () => controller.abort(new DOMException('Refresh timeout', 'TimeoutError')),
-      this.refreshTimeoutMs,
-    );
+    let timer: ReturnType<typeof setTimeout> | undefined;
 
-    // В Node таймер не удерживает event loop.
-    if (typeof timer === 'object' && typeof (timer as { unref?: unknown }).unref === 'function') {
-      (timer as { unref: () => void }).unref();
-    }
+    // Таймаут отклоняет промис сам, независимо от того, слушает ли
+    // реализация signal. controller.abort - подсказка ей.
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        const reason = new DOMException('Refresh timeout', 'TimeoutError');
+        controller.abort(reason);
+        reject(reason);
+      }, this.refreshTimeoutMs);
+
+      if (typeof timer === 'object' && typeof (timer as { unref?: unknown }).unref === 'function') {
+        (timer as { unref: () => void }).unref();
+      }
+    });
+
+    timeoutPromise.catch(() => {});
 
     let result: RefreshResult;
 
     try {
-      result = await provider.refresh(controller.signal);
+      result = await Promise.race([provider.refresh(controller.signal), timeoutPromise]);
     } catch (e) {
       const err = classifyFetchError(e);
 

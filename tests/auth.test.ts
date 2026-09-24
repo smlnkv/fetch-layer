@@ -476,6 +476,28 @@ describe('auth - refreshTimeoutMs', () => {
       code: 'REFRESH_TIMEOUT',
     });
   });
+
+  it('refresh завершается по refreshTimeoutMs, даже если реализация не слушает signal', async () => {
+    // Провайдер принимает signal по сигнатуре, но не подписывается
+    // на него и возвращает промис, который никогда не завершается.
+    // Без гонки с таймаутным промисом вызов завис бы навсегда,
+    // а параллельные 401 встали бы в очередь через SingleFlight.
+    const provider: SessionProvider = {
+      getAuthHeaders: () => ({ Authorization: 'Bearer token' }),
+      refresh: () => new Promise<never>(() => {}),
+    };
+
+    const mock = createMockFetch(() => ({ status: 401, body: { code: 'SESSION_INVALID' } }));
+    const client = createTestClient({
+      fetch: mock.fetch,
+      auth: { provider, refreshTimeoutMs: 50, circuitBreakerMs: 60_000 },
+    });
+
+    await expect(client.get('/users')).rejects.toMatchObject({
+      kind: 'timeout',
+      code: 'REFRESH_TIMEOUT',
+    });
+  });
 });
 
 describe('auth - валидация конфигурации', () => {
