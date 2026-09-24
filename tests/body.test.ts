@@ -167,6 +167,37 @@ describe('prepareBody', () => {
       expect((e as ApiError).cause).toBeInstanceOf(TypeError);
     }
   });
+
+  it('Map, Set, RegExp, Error отклоняются с BODY_SERIALIZATION_ERROR', () => {
+    // JSON.stringify вернул бы {} для этих типов, и сервер получил бы
+    // пустой объект вместо данных. Ошибка возникает до отправки.
+    for (const body of [
+      new Map([['a', 1]]),
+      new Set([1, 2]),
+      new WeakMap(),
+      new WeakSet(),
+      /pattern/,
+      new Error('boom'),
+    ]) {
+      expect(() => prepareBody(body)).toThrowError(
+        expect.objectContaining({
+          kind: 'serialize',
+          code: 'BODY_SERIALIZATION_ERROR',
+        }),
+      );
+    }
+  });
+
+  it('сообщение об ошибке называет тип и подсказывает замену', () => {
+    try {
+      prepareBody(new Map());
+      expect.fail('should have thrown');
+    } catch (e) {
+      const err = e as ApiError;
+      expect(err.message).toMatch(/Map/);
+      expect(err.message).toMatch(/plain object/);
+    }
+  });
 });
 
 describe('isReadableStreamBody', () => {

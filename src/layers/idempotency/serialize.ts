@@ -1,51 +1,63 @@
 import { ApiError } from '../../core/errors';
 
 /**
- * false для типов, которые сериализуются в {}: у них нет перечисляемых
- * свойств, и два разных тела дали бы один отпечаток ключа
- * идемпотентности. Это FormData, Blob, ArrayBuffer, TypedArray,
- * ReadableStream, URLSearchParams.
+ * Имя типа, для которого стабильный отпечаток невозможен: либо
+ * нет перечисляемых свойств (JSON.stringify даёт {}), либо тело
+ * отправляется транспортом в собственном формате (FormData, Blob,
+ * ArrayBuffer, TypedArray, ReadableStream, URLSearchParams).
+ * null для остальных значений.
+ *
+ * Проверка через Object.prototype.toString, а не instanceof:
+ * instanceof не работает между realm, а тела часто приходят
+ * из iframe или worker. ArrayBuffer.isView cross-realm.
+ */
+function detectUnsupportedType(value: unknown): string | null {
+  if (value === null || typeof value !== 'object') return null;
+
+  switch (Object.prototype.toString.call(value)) {
+    case '[object FormData]':
+      return 'FormData';
+    case '[object Blob]':
+      return 'Blob';
+    case '[object ArrayBuffer]':
+      return 'ArrayBuffer';
+    case '[object ReadableStream]':
+      return 'ReadableStream';
+    case '[object URLSearchParams]':
+      return 'URLSearchParams';
+    case '[object Map]':
+      return 'Map';
+    case '[object Set]':
+      return 'Set';
+    case '[object WeakMap]':
+      return 'WeakMap';
+    case '[object WeakSet]':
+      return 'WeakSet';
+    case '[object RegExp]':
+      return 'RegExp';
+    case '[object Error]':
+      return 'Error';
+  }
+
+  if (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(value)) {
+    return 'TypedArray';
+  }
+
+  return null;
+}
+
+/**
+ * true для значений, для которых стабильный отпечаток возможен.
  *
  * undefined и null дают true: отсутствие тела - стабильное состояние.
- *
- * Проверки через Object.prototype.toString, а не instanceof:
- * instanceof не работает между realm, а тела часто приходят
- * из iframe или worker. ArrayBuffer.isView cross-realm -
- * это статический метод.
+ * FormData, Blob, ArrayBuffer, TypedArray, ReadableStream,
+ * URLSearchParams, Map, Set, WeakMap, WeakSet, RegExp и Error
+ * дают false: отпечаток либо невозможен, либо бесполезен
+ * (createSessionSource сгенерирует новый ключ без сохранения).
  */
 export function isSerializableBody(value: unknown): boolean {
   if (value === undefined || value === null) return true;
-
-  if (
-    typeof FormData !== 'undefined' &&
-    Object.prototype.toString.call(value) === '[object FormData]'
-  ) {
-    return false;
-  }
-  if (typeof Blob !== 'undefined' && Object.prototype.toString.call(value) === '[object Blob]') {
-    return false;
-  }
-  if (
-    typeof ArrayBuffer !== 'undefined' &&
-    Object.prototype.toString.call(value) === '[object ArrayBuffer]'
-  ) {
-    return false;
-  }
-  if (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(value)) return false;
-  if (
-    typeof ReadableStream !== 'undefined' &&
-    Object.prototype.toString.call(value) === '[object ReadableStream]'
-  ) {
-    return false;
-  }
-  if (
-    typeof URLSearchParams !== 'undefined' &&
-    Object.prototype.toString.call(value) === '[object URLSearchParams]'
-  ) {
-    return false;
-  }
-
-  return true;
+  return detectUnsupportedType(value) === null;
 }
 
 /**
@@ -57,15 +69,12 @@ export function isSerializableBody(value: unknown): boolean {
  * для отпечатков тел. Совпадает с ним по формату, поэтому подходит
  * для кастомных IdempotencySource.
  *
- * Map и Set сериализуются как {}: у них нет перечисляемых свойств.
- * Два разных Map с одинаковыми размерами дадут одинаковый отпечаток.
- * Если тело содержит Map или Set, преобразуйте его в массив пар
- * перед вычислением отпечатка.
- *
  * @throws ApiError с кодом BODY_SERIALIZATION_ERROR при циклических
- *   ссылках или BigInt. Сырой TypeError нормализуется в тот же код,
- *   что и в prepareBody, чтобы приложение обрабатывало один класс
- *   ошибок.
+ *   ссылках, BigInt и типах без перечисляемых свойств: FormData,
+ *   Blob, ArrayBuffer, TypedArray, ReadableStream, URLSearchParams,
+ *   Map, Set, WeakMap, WeakSet, RegExp, Error. Сырой TypeError
+ *   нормализуется в тот же код, что и в prepareBody, чтобы
+ *   приложение обрабатывало один класс ошибок.
  *
  * @public
  * @stableSince 0.1.0
@@ -97,6 +106,13 @@ export function stableSerialize(value: unknown): string {
  * прямо сейчас".
  */
 function serialize(value: unknown, seen: WeakSet<object>): string {
+  // Проверка до toJSON: контракт "несериализуемые типы отклоняются"
+  // не должен обходиться через пользовательский toJSON.
+  const unsupported = detectUnsupportedType(value);
+  if (unsupported !== null) {
+    throw new TypeError(`Cannot serialize ${unsupported} to a stable JSON string`);
+  }
+
   // Как в JSON.stringify: позволяет работать с Date, URL и другими
   // типами, у которых toJSON определён.
   if (value && typeof value === 'object') {

@@ -78,31 +78,69 @@ describe('stableSerialize - toJSON', () => {
   });
 });
 
-describe('stableSerialize - Map и Set', () => {
-  it('Map и Set сериализуются как {} на любом уровне вложенности', () => {
-    // Ограничение stableSerialize: у Map и Set нет перечисляемых свойств.
-    // Разные Map с одинаковым размером дают одинаковый отпечаток.
-    const map1 = new Map([
-      ['a', 1],
-      ['b', 2],
-    ]);
-    const map2 = new Map([
-      ['c', 3],
-      ['d', 4],
-    ]);
-    expect(stableSerialize(map1)).toBe('{}');
-    expect(stableSerialize(map2)).toBe('{}');
-    expect(stableSerialize(map1)).toBe(stableSerialize(map2));
+describe('stableSerialize - несериализуемые типы', () => {
+  it('Map, Set, WeakMap, WeakSet отклоняются', () => {
+    expect(() => stableSerialize(new Map())).toThrowError(
+      expect.objectContaining({
+        kind: 'serialize',
+        code: 'BODY_SERIALIZATION_ERROR',
+      }),
+    );
+    expect(() => stableSerialize(new Set())).toThrowError(
+      expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
+    );
+    expect(() => stableSerialize(new WeakMap())).toThrowError(
+      expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
+    );
+    expect(() => stableSerialize(new WeakSet())).toThrowError(
+      expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
+    );
+  });
 
-    // Ограничение действует и внутри объектов.
-    const body1 = { tags: new Set(['a', 'b']) };
-    const body2 = { tags: new Set(['c', 'd']) };
-    expect(stableSerialize(body1)).toBe(stableSerialize(body2));
+  it('RegExp и Error отклоняются, включая вложенные в объект и массив', () => {
+    expect(() => stableSerialize(/x/)).toThrowError(
+      expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
+    );
+    expect(() => stableSerialize(new Error('x'))).toThrowError(
+      expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
+    );
 
-    // Рекомендованная альтернатива - массив.
-    const body3 = { tags: ['a', 'b'] };
-    const body4 = { tags: ['c', 'd'] };
-    expect(stableSerialize(body3)).not.toBe(stableSerialize(body4));
+    expect(() => stableSerialize({ pattern: /x/ })).toThrowError(
+      expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
+    );
+    expect(() => stableSerialize([new Map()])).toThrowError(
+      expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
+    );
+  });
+
+  it('FormData, Blob, ArrayBuffer, TypedArray, ReadableStream, URLSearchParams отклоняются', () => {
+    expect(() => stableSerialize(new FormData())).toThrowError(
+      expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
+    );
+    expect(() => stableSerialize(new Blob(['x']))).toThrowError(
+      expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
+    );
+    expect(() => stableSerialize(new ArrayBuffer(8))).toThrowError(
+      expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
+    );
+    expect(() => stableSerialize(new Uint8Array([1]))).toThrowError(
+      expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
+    );
+    expect(() => stableSerialize(new ReadableStream())).toThrowError(
+      expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
+    );
+    expect(() => stableSerialize(new URLSearchParams({ a: '1' }))).toThrowError(
+      expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
+    );
+  });
+
+  it('toJSON не обходит проверку: Map с toJSON всё равно отклоняется', () => {
+    const fakeMap = new Map();
+    (fakeMap as unknown as { toJSON: () => unknown }).toJSON = () => ({ a: 1 });
+
+    expect(() => stableSerialize(fakeMap)).toThrowError(
+      expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
+    );
   });
 });
 
@@ -178,6 +216,15 @@ describe('isSerializableBody', () => {
     expect(isSerializableBody(new Int32Array([1, 2]))).toBe(false);
     expect(isSerializableBody(new ReadableStream())).toBe(false);
     expect(isSerializableBody(new URLSearchParams({ a: '1' }))).toBe(false);
+  });
+
+  it('false для Map, Set, WeakMap, WeakSet, RegExp, Error', () => {
+    expect(isSerializableBody(new Map())).toBe(false);
+    expect(isSerializableBody(new Set())).toBe(false);
+    expect(isSerializableBody(new WeakMap())).toBe(false);
+    expect(isSerializableBody(new WeakSet())).toBe(false);
+    expect(isSerializableBody(/x/)).toBe(false);
+    expect(isSerializableBody(new Error('x'))).toBe(false);
   });
 });
 

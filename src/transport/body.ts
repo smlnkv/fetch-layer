@@ -80,6 +80,33 @@ export function isStreamingBody(value: unknown): boolean {
 }
 
 /**
+ * Имя типа, у которого JSON.stringify даст {}: перечисляемых свойств
+ * нет, и тело доедет до сервера пустым. В prepareBody такие значения
+ * отклоняются. Проверка через Object.prototype.toString работает
+ * между realm.
+ */
+function detectJSONUnfriendlyType(value: unknown): string | null {
+  if (value === null || typeof value !== 'object') return null;
+
+  switch (Object.prototype.toString.call(value)) {
+    case '[object Map]':
+      return 'Map';
+    case '[object Set]':
+      return 'Set';
+    case '[object WeakMap]':
+      return 'WeakMap';
+    case '[object WeakSet]':
+      return 'WeakSet';
+    case '[object RegExp]':
+      return 'RegExp';
+    case '[object Error]':
+      return 'Error';
+    default:
+      return null;
+  }
+}
+
+/**
  * contentType === undefined означает, что транспорт не должен
  * выставлять заголовок: либо тело отсутствует, либо решение
  * принимает браузер (FormData с boundary), либо приложение уже
@@ -101,7 +128,10 @@ export interface PreparedBody {
  * важен для сервера.
  *
  * @throws ApiError с кодом BODY_SERIALIZATION_ERROR, если тело
- *   не удалось сериализовать в JSON: циклические ссылки, BigInt.
+ *   не удалось сериализовать в JSON: циклические ссылки, BigInt,
+ *   Map, Set, WeakMap, WeakSet, RegExp, Error. Для последних
+ *   JSON.stringify вернул бы {}, и сервер получил бы пустой объект
+ *   вместо данных.
  */
 export function prepareBody(value: unknown): PreparedBody {
   if (value === undefined || value === null) {
@@ -153,6 +183,17 @@ export function prepareBody(value: unknown): PreparedBody {
   // отправить text/plain, text/csv, text/html и что угодно ещё.
   if (typeof value === 'string') {
     return { body: value, contentType: undefined };
+  }
+
+  const unsupported = detectJSONUnfriendlyType(value);
+  if (unsupported !== null) {
+    throw new ApiError({
+      kind: 'serialize',
+      code: 'BODY_SERIALIZATION_ERROR',
+      message:
+        `Request body contains a ${unsupported}. ` +
+        `Convert it to a plain object or an array before sending.`,
+    });
   }
 
   try {
