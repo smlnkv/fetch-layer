@@ -121,6 +121,25 @@ describe('onBeforeSend', () => {
     expect(captured[0]?.['Idempotency-Key']).toBe('key-42');
   });
 
+  it('видит Accept и Content-Type, добавленные транспортом', async () => {
+    const captured: Record<string, string>[] = [];
+    const mock = createMockFetch(() => ({ body: {} }));
+    const client = createTestClient({
+      fetch: mock.fetch,
+      hooks: {
+        onBeforeSend: (config) => {
+          captured.push(config.headers ?? {});
+        },
+      },
+    });
+
+    await client.get('/users');
+    expect(captured[0]?.Accept).toBe('application/json');
+
+    await client.post('/orders', { total: 100 });
+    expect(captured[1]?.['Content-Type']).toBe('application/json');
+  });
+
   it('вызывается перед каждой попыткой повтора', async () => {
     const onBeforeSend = vi.fn();
     let attempts = 0;

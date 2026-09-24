@@ -138,7 +138,9 @@ export function createBaseRequest(options: TransportOptions): RequestFn {
         (init as RequestInit & { duplex: 'half' }).duplex = 'half';
       }
 
-      runOnBeforeSend(hooks, config);
+      // Хук видит финальные заголовки: headers уже содержит Accept
+      // и Content-Type, добавленные транспортом.
+      runOnBeforeSend(hooks, { ...config, headers });
 
       // TypeError вокруг fetch означает сетевую ошибку. Только
       // здесь: в остальных местах источник TypeError неизвестен.
