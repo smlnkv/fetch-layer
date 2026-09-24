@@ -1,6 +1,7 @@
 import { toApiError } from './core/errors';
 import { runOnError, runOnRequest } from './core/hooks';
 import { applyLayers, runAttach, validateLayerOrder } from './core/layer';
+import { safeCall } from './shared/safe-call';
 import { assertNonEmptyString, assertPositiveNumber } from './shared/validators';
 import { createBaseRequest, type TransportOptions } from './transport/transport';
 
@@ -92,17 +93,23 @@ export function createClient(options: ClientOptions): Client {
 
     try {
       const result = await pipeline<T>(finalConfig);
-      logger.debug?.(`[fetch-layer] ${method} ${finalConfig.path} ok in ${Date.now() - t0}ms`);
+      safeCall(() =>
+        logger.debug?.(`[fetch-layer] ${method} ${finalConfig.path} ok in ${Date.now() - t0}ms`),
+      );
       return result;
     } catch (e) {
       const error = toApiError(e);
 
-      logger.debug?.(
-        `[fetch-layer] ${method} ${finalConfig.path} failed in ${Date.now() - t0}ms: ${error.code}`,
+      safeCall(() =>
+        logger.debug?.(
+          `[fetch-layer] ${method} ${finalConfig.path} failed in ${Date.now() - t0}ms: ${error.code}`,
+        ),
       );
 
       if (!error.isCancelled) {
-        logger.error?.(`[fetch-layer] ${method} ${finalConfig.path}: ${error.message}`);
+        safeCall(() =>
+          logger.error?.(`[fetch-layer] ${method} ${finalConfig.path}: ${error.message}`),
+        );
       }
 
       runOnError(options.hooks, finalConfig, error);

@@ -1,6 +1,7 @@
 import { type ApiError, toApiError } from '../../core/errors';
 import { runOnRetry } from '../../core/hooks';
 import { isMutatingMethod } from '../../shared/method';
+import { safeCall } from '../../shared/safe-call';
 import { sleep as defaultSleep, throwIfAborted } from '../../shared/signals';
 import {
   assertInteger,
@@ -45,7 +46,8 @@ export interface RetryOptions {
    *
    * Предупреждение не выводится, если приложение задало заголовок
    * само или передало skipIdempotency: true. Выводится один раз
-   * на пару (method, path).
+   * на метод и корневой сегмент пути: для DELETE /sessions/123
+   * корневой сегмент - sessions.
    */
   warnOnUnsafeRetry?: boolean;
 
@@ -74,6 +76,9 @@ export interface RetryOptions {
    * retryOnNetwork и retryOnTimeout. Ошибки авторизации и отмены
    * не повторяются, даже если функция вернёт true.
    *
+   * Падение колбэка не подменяет исходную ошибку: применяется
+   * та же политика, что и без колбэка.
+   *
    * @param attempt - номер провалившейся попытки, считая с 1.
    */
   shouldRetry?: (error: ApiError, attempt: number) => boolean;
@@ -83,12 +88,26 @@ export interface RetryOptions {
    * прислал Retry-After. Результат ограничивается диапазоном
    * [MIN_RETRY_MS, maxDelayMs].
    *
+   * Падение колбэка не подменяет исходную ошибку: применяется
+   * та же задержка, что и без колбэка.
+   *
    * @param attempt - номер провалившейся попытки, считая с 1.
    */
   computeDelay?: (attempt: number, error: ApiError) => number;
 
   /** Пауза между попытками. По умолчанию setTimeout с отменой. */
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+}
+
+/**
+ * Первый сегмент пути: для "/orders/123" это "orders". Служит
+ * ключом дедупликации предупреждения: динамические id внутри
+ * одного ресурса схлопываются, разные ресурсы дают разные ключи.
+ */
+function rootSegment(path: string): string {
+  const trimmed = path.replace(/^\/+/, '');
+  const slash = trimmed.indexOf('/');
+  return slash === -1 ? trimmed : trimmed.slice(0, slash);
 }
 
 /**
@@ -141,8 +160,6 @@ export function withRetry(options: RetryOptions = {}): Layer {
     return true;
   };
 
-  const shouldRetry = options.shouldRetry ?? defaultShouldRetry;
-
   /**
    * Начинается с 1: первый повтор даёт базовую задержку, второй -
    * удвоенную.
@@ -151,8 +168,6 @@ export function withRetry(options: RetryOptions = {}): Layer {
     const jitter = 1 - jitterRatio + Math.random() * jitterRatio * 2;
     return baseDelayMs * 2 ** (attempt - 1) * jitter;
   };
-
-  const compute = computeDelay ?? defaultCompute;
 
   return {
     name: 'withRetry',
@@ -167,7 +182,7 @@ export function withRetry(options: RetryOptions = {}): Layer {
       const warnUnsafeRetryOnce = (key: string, message: string): void => {
         if (warnedUnsafeRetry.has(key)) return;
         warnedUnsafeRetry.add(key);
-        logger?.warn?.(message);
+        safeCall(() => logger?.warn?.(message));
       };
 
       const fn: RequestFn = async function retryRequest<T>(
@@ -190,7 +205,7 @@ export function withRetry(options: RetryOptions = {}): Layer {
           !initialConfig.skipIdempotency
         ) {
           warnUnsafeRetryOnce(
-            `retry-unsafe:${method}:${initialConfig.path}`,
+            `retry-unsafe:${method}:${rootSegment(initialConfig.path)}`,
             `[fetch-layer] Retry is enabled for ${method} ${initialConfig.path} ` +
               `without the ${idempotencyHeaderName} header. On a network failure ` +
               `the retry may create a duplicate. Add the header or disable retry ` +
@@ -214,7 +229,14 @@ export function withRetry(options: RetryOptions = {}): Layer {
 
             const failedAttempt = attempt + 1;
 
-            if (!shouldRetry(err, failedAttempt)) throw err;
+            const retryDecision =
+              safeCall(() =>
+                options.shouldRetry
+                  ? options.shouldRetry(err, failedAttempt)
+                  : defaultShouldRetry(err),
+              ) ?? defaultShouldRetry(err);
+
+            if (!retryDecision) throw err;
 
             // Retry-After имеет приоритет: если сервер запросил
             // больше maxDelayMs, повтор не выполняем.
@@ -223,7 +245,12 @@ export function withRetry(options: RetryOptions = {}): Layer {
               if (err.retryAfterMs > maxDelayMs) throw err;
               delay = clampDelay(err.retryAfterMs, MIN_RETRY_MS);
             } else {
-              delay = Math.min(clampDelay(compute(failedAttempt, err), MIN_RETRY_MS), maxDelayMs);
+              const computed =
+                safeCall(() =>
+                  computeDelay ? computeDelay(failedAttempt, err) : defaultCompute(failedAttempt),
+                ) ?? defaultCompute(failedAttempt);
+
+              delay = Math.min(clampDelay(computed, MIN_RETRY_MS), maxDelayMs);
             }
 
             config = runOnRetry(context.hooks, config, failedAttempt, err);
