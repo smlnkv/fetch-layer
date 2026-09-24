@@ -54,6 +54,24 @@ describe('idempotency - базовое', () => {
     expect(keyOf(mock.calls[6])).toBeUndefined();
   });
 
+  it('добавляет ключ для метода в нижнем регистре', async () => {
+    // Метод нормализуется в client.ts до входа в pipeline.
+    // Без нормализации withIdempotency не распознаёт 'post'
+    // как мутирующий и оставляет запрос без ключа.
+    const mock = createMockFetch(() => ({ body: null }));
+    const source = createSessionSource({ storage: createMemoryStorage() });
+    const client = createIdempotentClient({ fetch: mock.fetch, source });
+
+    await client.request({
+      path: '/orders',
+      method: 'post' as unknown as 'POST',
+      body: { total: 100 },
+    });
+
+    expect(mock.calls[0]?.method).toBe('POST');
+    expect(keyOf(mock.calls[0])).toBeDefined();
+  });
+
   it('memoryStorageSource работает как источник ключей', async () => {
     const mock = createMockFetch(() => ({ body: { id: '1' } }));
     const client = createTestClient({

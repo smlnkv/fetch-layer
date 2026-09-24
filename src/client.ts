@@ -5,7 +5,7 @@ import { assertNonEmptyString, assertPositiveNumber } from './shared/validators'
 import { createBaseRequest, type TransportOptions } from './transport/transport';
 
 import type { Layer, LayerContext, Logger } from './core/layer';
-import type { Client, RequestConfig, RequestFn, RequestOptions } from './core/types';
+import type { Client, HttpMethod, RequestConfig, RequestFn, RequestOptions } from './core/types';
 
 const MIN_TIMEOUT_MS = 100;
 
@@ -75,8 +75,17 @@ export function createClient(options: ClientOptions): Client {
   const { pipeline, states } = applyLayers(baseRequest, layers, context);
 
   const wrapped: RequestFn = async <T>(config: RequestConfig): Promise<T> => {
-    const finalConfig = runOnRequest(options.hooks, config);
-    const method = finalConfig.method ?? 'GET';
+    const hooked = runOnRequest(options.hooks, config);
+
+    // Нормализуем метод до верхнего регистра: слои (withIdempotency,
+    // withRetry) сравнивают его со строками 'POST', 'PUT' и другими.
+    // Fetch нормализует сам, но слои получают конфиг до fetch.
+    const finalConfig: RequestConfig = {
+      ...hooked,
+      method: (hooked.method ?? 'GET').toUpperCase() as HttpMethod,
+    };
+
+    const method = finalConfig.method as HttpMethod;
     const t0 = Date.now();
 
     try {
