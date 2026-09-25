@@ -76,16 +76,18 @@ export function createClient(options: ClientOptions): Client {
   const { pipeline, states } = applyLayers(baseRequest, layers, context);
 
   const wrapped: RequestFn = async <T>(config: RequestConfig): Promise<T> => {
-    assertNonEmptyString(config.path, 'client: path');
+    const hooked = runOnRequest(options.hooks, config);
 
-    if (config.timeoutMs !== undefined) {
-      assertPositiveNumber(config.timeoutMs, 'client: timeoutMs');
-      if (config.timeoutMs < MIN_TIMEOUT_MS) {
+    // onRequest может вернуть новый конфиг: проверяем его поля,
+    // а не исходные.
+    assertNonEmptyString(hooked.path, 'client: path');
+
+    if (hooked.timeoutMs !== undefined) {
+      assertPositiveNumber(hooked.timeoutMs, 'client: timeoutMs');
+      if (hooked.timeoutMs < MIN_TIMEOUT_MS) {
         throw new Error(`client: timeoutMs must be at least ${MIN_TIMEOUT_MS} ms`);
       }
     }
-
-    const hooked = runOnRequest(options.hooks, config);
 
     // Нормализуем метод до верхнего регистра: слои (withIdempotency,
     // withRetry) сравнивают его со строками 'POST', 'PUT' и другими.
