@@ -255,6 +255,10 @@ export function withRetry(options: RetryOptions = {}): Layer {
 
             config = runOnRetry(context.hooks, config, failedAttempt, err);
 
+            // onRetry вернул конфиг со skipRetry: следующей попытки
+            // не будет. Проверяем до sleep, чтобы не ждать зря.
+            if (config.skipRetry) throw err;
+
             await sleep(delay, config.signal);
           }
         }

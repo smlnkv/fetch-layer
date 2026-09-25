@@ -654,6 +654,30 @@ describe('retry - warnOnUnsafeRetry', () => {
       warn.mockRestore();
     }
   });
+
+  it('разные ресурсы дают отдельные предупреждения, id внутри ресурса не дают', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const mock = createMockFetch(() => ({ status: 500, body: {} }));
+      const client = createRetryClient({
+        fetch: mock.fetch,
+        maxAttempts: 2,
+        sleep: noSleep,
+        warnOnUnsafeRetry: true,
+      });
+
+      await expect(client.delete('/sessions/1')).rejects.toBeDefined();
+      await expect(client.delete('/sessions/2')).rejects.toBeDefined();
+      await expect(client.delete('/sessions/3')).rejects.toBeDefined();
+      expect(warn).toHaveBeenCalledTimes(1);
+
+      await expect(client.delete('/orders/1')).rejects.toBeDefined();
+      await expect(client.delete('/orders/2')).rejects.toBeDefined();
+      expect(warn).toHaveBeenCalledTimes(2);
+    } finally {
+      warn.mockRestore();
+    }
+  });
 });
 
 describe('retry - onRetry hook', () => {
@@ -699,6 +723,25 @@ describe('retry - onRetry hook', () => {
     await client.get('/users');
 
     expect(secondRequestHeader).toBe('1');
+  });
+
+  it('onRetry может остановить повторы через skipRetry', async () => {
+    let attempts = 0;
+    const mock = createMockFetch(() => {
+      attempts++;
+      return { status: 500, body: {} };
+    });
+
+    const client = createTestClient({
+      fetch: mock.fetch,
+      retry: { maxAttempts: 5, sleep: noSleep },
+      hooks: {
+        onRetry: (config) => ({ ...config, skipRetry: true }),
+      },
+    });
+
+    await expect(client.get('/users')).rejects.toMatchObject({ status: 500 });
+    expect(attempts).toBe(1);
   });
 
   it('падение onRetry не ломает запрос', async () => {
