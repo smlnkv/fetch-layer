@@ -78,6 +78,13 @@ export function createClient(options: ClientOptions): Client {
   const wrapped: RequestFn = async <T>(config: RequestConfig): Promise<T> => {
     assertNonEmptyString(config.path, 'client: path');
 
+    if (config.timeoutMs !== undefined) {
+      assertPositiveNumber(config.timeoutMs, 'client: timeoutMs');
+      if (config.timeoutMs < MIN_TIMEOUT_MS) {
+        throw new Error(`client: timeoutMs must be at least ${MIN_TIMEOUT_MS} ms`);
+      }
+    }
+
     const hooked = runOnRequest(options.hooks, config);
 
     // Нормализуем метод до верхнего регистра: слои (withIdempotency,

@@ -651,13 +651,27 @@ describe('client - request()', () => {
   });
 });
 
-describe('client - валидация path', () => {
+describe('client - валидация', () => {
   it('ошибка до запроса при пустом или нестроковом path', async () => {
     const mock = createMockFetch(() => ({ body: {} }));
     const client = createTestClient({ fetch: mock.fetch });
 
     await expect(client.get('')).rejects.toThrow(/client: path/);
     await expect(client.get(null as unknown as string)).rejects.toThrow(/client: path/);
+
+    expect(mock.calls).toHaveLength(0);
+  });
+
+  it('ошибка до запроса при невалидном per-request timeoutMs', async () => {
+    const mock = createMockFetch(() => ({ body: {} }));
+    const client = createTestClient({ fetch: mock.fetch });
+
+    await expect(client.get('/users', { timeoutMs: -1 })).rejects.toThrow(/client: timeoutMs/);
+    await expect(client.get('/users', { timeoutMs: 0 })).rejects.toThrow(/client: timeoutMs/);
+    await expect(client.get('/users', { timeoutMs: NaN })).rejects.toThrow(/client: timeoutMs/);
+    await expect(client.get('/users', { timeoutMs: 50 })).rejects.toThrow(
+      /client: timeoutMs must be at least 100 ms/,
+    );
 
     expect(mock.calls).toHaveLength(0);
   });
