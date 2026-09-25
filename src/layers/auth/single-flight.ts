@@ -20,11 +20,16 @@ export class SingleFlight<T> {
       return this.inFlight;
     }
 
-    this.inFlight = fn().finally(() => {
-      this.inFlight = null;
+    const promise = fn().finally(() => {
+      // Ссылка могла быть обнулена через forget и заменена новым
+      // промисом от run. Тогда трогать её нельзя.
+      if (this.inFlight === promise) {
+        this.inFlight = null;
+      }
     });
 
-    return this.inFlight;
+    this.inFlight = promise;
+    return promise;
   }
 
   /**

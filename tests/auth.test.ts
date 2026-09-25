@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { ApiError } from '../src/index';
 import { resetRefreshCircuit, type SessionProvider } from '../src/layers/auth/index';
+import { SingleFlight } from '../src/layers/auth/single-flight';
 
 import { createMockFetch, createTestSessionProvider, createTestClient } from './helpers';
 
@@ -756,5 +757,34 @@ describe('resetRefreshCircuit', () => {
     const mock2 = createMockFetch(() => ({ body: {} }));
     const client2 = createTestClient({ fetch: mock2.fetch, auth: { provider } });
     expect(resetRefreshCircuit(client2)).toBe(true);
+  });
+});
+
+describe('SingleFlight', () => {
+  it('forget не ломает следующий run при завершении старой операции', async () => {
+    const sf = new SingleFlight<number>();
+
+    let resolveA!: (value: number) => void;
+    const A = new Promise<number>((resolve) => {
+      resolveA = resolve;
+    });
+    const runA = sf.run(() => A);
+
+    sf.forget();
+
+    const B = new Promise<number>(() => {
+      // Никогда не завершается: проверяем, что ссылка на него
+      // не будет обнулена завершением A.
+    });
+    const runB = sf.run(() => B);
+
+    resolveA(1);
+    await runA;
+
+    // После завершения A ссылка на B должна остаться в inFlight.
+    // Без защиты finally обнулил бы её, и следующий run создал бы
+    // параллельную операцию, а не присоединился к B.
+    const runC = sf.run(() => Promise.resolve(3));
+    expect(runC).toBe(runB);
   });
 });
