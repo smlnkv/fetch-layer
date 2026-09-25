@@ -567,7 +567,7 @@ describe('retry - warnOnUnsafeRetry', () => {
     warn.mockRestore();
   });
 
-  it('не предупреждает, если отключено, ключ есть или метод безопасный', async () => {
+  it('не предупреждает при отключённом warn, заданном ключе, безопасном методе, skipIdempotency или кастомном имени заголовка', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       const mock1 = createMockFetch(() => ({ status: 500, body: {} }));
@@ -599,13 +599,33 @@ describe('retry - warnOnUnsafeRetry', () => {
       });
       await expect(client3.get('/users')).rejects.toBeDefined();
 
+      const mock4 = createMockFetch(() => ({ status: 500, body: {} }));
+      const client4 = createRetryClient({
+        fetch: mock4.fetch,
+        maxAttempts: 2,
+        sleep: noSleep,
+        warnOnUnsafeRetry: true,
+      });
+      await expect(client4.post('/orders', {}, { skipIdempotency: true })).rejects.toBeDefined();
+
+      const mock5 = createMockFetch(() => ({ status: 500, body: {} }));
+      const client5 = createTestClient({
+        fetch: mock5.fetch,
+        retry: { maxAttempts: 2, sleep: noSleep, warnOnUnsafeRetry: true },
+        idempotency: {
+          source: { nextKey: () => 'auto-key' },
+          headerName: 'X-Idempotency-Key',
+        },
+      });
+      await expect(client5.post('/orders', {})).rejects.toBeDefined();
+
       expect(warn).not.toHaveBeenCalled();
     } finally {
       warn.mockRestore();
     }
   });
 
-  it('не предупреждает при skipIdempotency: true', async () => {
+  it('предупреждает один раз на клиента', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       const mock = createMockFetch(() => ({ status: 500, body: {} }));
@@ -616,39 +636,10 @@ describe('retry - warnOnUnsafeRetry', () => {
         warnOnUnsafeRetry: true,
       });
 
-      await expect(client.post('/orders', {}, { skipIdempotency: true })).rejects.toBeDefined();
+      await expect(client.post('/orders', { a: 1 })).rejects.toBeDefined();
+      await expect(client.post('/orders', { a: 2 })).rejects.toBeDefined();
+      await expect(client.post('/orders', { a: 3 })).rejects.toBeDefined();
 
-      expect(warn).not.toHaveBeenCalled();
-    } finally {
-      warn.mockRestore();
-    }
-  });
-
-  it('не предупреждает при кастомном имени заголовка и предупреждает один раз на клиента', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    try {
-      const mock1 = createMockFetch(() => ({ status: 500, body: {} }));
-      const client1 = createTestClient({
-        fetch: mock1.fetch,
-        retry: { maxAttempts: 2, sleep: noSleep, warnOnUnsafeRetry: true },
-        idempotency: {
-          source: { nextKey: () => 'auto-key' },
-          headerName: 'X-Idempotency-Key',
-        },
-      });
-      await expect(client1.post('/orders', {})).rejects.toBeDefined();
-      expect(warn).not.toHaveBeenCalled();
-
-      const mock2 = createMockFetch(() => ({ status: 500, body: {} }));
-      const client2 = createRetryClient({
-        fetch: mock2.fetch,
-        maxAttempts: 2,
-        sleep: noSleep,
-        warnOnUnsafeRetry: true,
-      });
-      await expect(client2.post('/orders', { a: 1 })).rejects.toBeDefined();
-      await expect(client2.post('/orders', { a: 2 })).rejects.toBeDefined();
-      await expect(client2.post('/orders', { a: 3 })).rejects.toBeDefined();
       expect(warn).toHaveBeenCalledTimes(1);
     } finally {
       warn.mockRestore();

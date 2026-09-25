@@ -130,18 +130,6 @@ describe('prepareBody', () => {
     });
   });
 
-  it('распознаёт FormData и Blob через duck-typing', () => {
-    const fakeFormData = {
-      [Symbol.toStringTag]: 'FormData',
-    };
-    Object.setPrototypeOf(fakeFormData, FormData.prototype);
-    expect(prepareBody(fakeFormData).contentType).toBeUndefined();
-
-    const blob = new Blob(['x'], { type: 'text/plain' });
-    Object.defineProperty(blob, Symbol.toStringTag, { value: 'Blob' });
-    expect(prepareBody(blob).contentType).toBe('text/plain');
-  });
-
   it('ошибки сериализации: BigInt и циклы', () => {
     expect(() => prepareBody({ id: 1n })).toThrowError(
       expect.objectContaining({

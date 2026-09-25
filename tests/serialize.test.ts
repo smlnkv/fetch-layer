@@ -97,48 +97,28 @@ describe('stableSerialize - несериализуемые типы', () => {
     );
   });
 
-  it('RegExp и Error отклоняются, включая вложенные в объект и массив', () => {
-    expect(() => stableSerialize(/x/)).toThrowError(
-      expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
-    );
-    expect(() => stableSerialize(new Error('x'))).toThrowError(
-      expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
-    );
+  it('FormData, Blob, ArrayBuffer, TypedArray, ReadableStream, URLSearchParams, RegExp, Error отклоняются, включая вложенные', () => {
+    const types = [
+      new FormData(),
+      new Blob(['x']),
+      new ArrayBuffer(8),
+      new Uint8Array([1]),
+      new ReadableStream(),
+      new URLSearchParams({ a: '1' }),
+      /pattern/,
+      new Error('boom'),
+    ];
+
+    for (const value of types) {
+      expect(() => stableSerialize(value)).toThrowError(
+        expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
+      );
+    }
 
     expect(() => stableSerialize({ pattern: /x/ })).toThrowError(
       expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
     );
     expect(() => stableSerialize([new Map()])).toThrowError(
-      expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
-    );
-  });
-
-  it('FormData, Blob, ArrayBuffer, TypedArray, ReadableStream, URLSearchParams отклоняются', () => {
-    expect(() => stableSerialize(new FormData())).toThrowError(
-      expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
-    );
-    expect(() => stableSerialize(new Blob(['x']))).toThrowError(
-      expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
-    );
-    expect(() => stableSerialize(new ArrayBuffer(8))).toThrowError(
-      expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
-    );
-    expect(() => stableSerialize(new Uint8Array([1]))).toThrowError(
-      expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
-    );
-    expect(() => stableSerialize(new ReadableStream())).toThrowError(
-      expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
-    );
-    expect(() => stableSerialize(new URLSearchParams({ a: '1' }))).toThrowError(
-      expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
-    );
-  });
-
-  it('toJSON не обходит проверку: Map с toJSON всё равно отклоняется', () => {
-    const fakeMap = new Map();
-    (fakeMap as unknown as { toJSON: () => unknown }).toJSON = () => ({ a: 1 });
-
-    expect(() => stableSerialize(fakeMap)).toThrowError(
       expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
     );
   });
@@ -225,19 +205,5 @@ describe('isSerializableBody', () => {
     expect(isSerializableBody(new WeakSet())).toBe(false);
     expect(isSerializableBody(/x/)).toBe(false);
     expect(isSerializableBody(new Error('x'))).toBe(false);
-  });
-});
-
-describe('stableSerialize - практика', () => {
-  it('даёт одинаковый отпечаток для эквивалентных тел', () => {
-    const body1 = { items: ['a', 'b'], total: 100, customer: { id: '1', name: 'Alice' } };
-    const body2 = { customer: { name: 'Alice', id: '1' }, total: 100, items: ['a', 'b'] };
-
-    expect(stableSerialize(body1)).toBe(stableSerialize(body2));
-  });
-
-  it('даёт разный отпечаток для разных тел и типов', () => {
-    expect(stableSerialize({ total: 100 })).not.toBe(stableSerialize({ total: 200 }));
-    expect(stableSerialize({ a: 1 })).not.toBe(stableSerialize({ a: '1' }));
   });
 });

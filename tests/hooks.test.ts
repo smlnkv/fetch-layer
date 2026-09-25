@@ -276,11 +276,13 @@ describe('onError', () => {
     expect(abortErr.isCancelled).toBe(true);
   });
 
-  it('видит финальные заголовки при HTTP-ошибке', async () => {
+  it('видит финальные заголовки при ошибке', async () => {
     const captured: Record<string, string>[] = [];
-    const mock = createMockFetch(() => ({ status: 500, body: {} }));
-    const client = createTestClient({
-      fetch: mock.fetch,
+
+    // HTTP-ошибка: полный путь через слои, Content-Type и Idempotency-Key.
+    const httpMock = createMockFetch(() => ({ status: 500, body: {} }));
+    const httpClient = createTestClient({
+      fetch: httpMock.fetch,
       auth: {
         provider: createTestSessionProvider({ headers: { Authorization: 'Bearer token-1' } }),
       },
@@ -292,21 +294,19 @@ describe('onError', () => {
       },
     });
 
-    await expect(client.post('/orders', { total: 100 })).rejects.toBeDefined();
+    await expect(httpClient.post('/orders', { total: 100 })).rejects.toBeDefined();
 
     expect(captured).toHaveLength(1);
     expect(captured[0]?.Authorization).toBe('Bearer token-1');
     expect(captured[0]?.['Idempotency-Key']).toBe('key-42');
     expect(captured[0]?.['Content-Type']).toBe('application/json');
-  });
 
-  it('видит финальные заголовки при сетевой ошибке', async () => {
-    const captured: Record<string, string>[] = [];
-    const mock = createMockFetch(() => {
+    // Сетевая ошибка: тот же путь через catch в транспорте, Accept.
+    const netMock = createMockFetch(() => {
       throw new TypeError('Network down');
     });
-    const client = createTestClient({
-      fetch: mock.fetch,
+    const netClient = createTestClient({
+      fetch: netMock.fetch,
       auth: {
         provider: createTestSessionProvider({ headers: { Authorization: 'Bearer token-1' } }),
       },
@@ -317,11 +317,11 @@ describe('onError', () => {
       },
     });
 
-    await expect(client.get('/users')).rejects.toBeDefined();
+    await expect(netClient.get('/users')).rejects.toBeDefined();
 
-    expect(captured).toHaveLength(1);
-    expect(captured[0]?.Authorization).toBe('Bearer token-1');
-    expect(captured[0]?.Accept).toBe('application/json');
+    expect(captured).toHaveLength(2);
+    expect(captured[1]?.Authorization).toBe('Bearer token-1');
+    expect(captured[1]?.Accept).toBe('application/json');
   });
 
   it('при ошибке сериализации тела получает конфиг без финальных заголовков', async () => {

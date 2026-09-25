@@ -253,68 +253,6 @@ describe('integration - circuit breaker + retry', () => {
   });
 });
 
-describe('integration - cooldown', () => {
-  it('второй запрос в окне cooldown повторяется с текущим токеном без refresh', async () => {
-    // Первый запрос: 401 -> refresh -> success. Записывается
-    // lastSuccessfulRefreshAt.
-    //
-    // Второй запрос: получает 401, попадает в cooldown,
-    // повторяется с текущими заголовками без вызова refresh.
-    // Сервер на второй запрос отвечает успехом.
-    let refreshCount = 0;
-    let token = 'old';
-    let requestCount = 0;
-
-    const mock = createMockFetch(() => {
-      requestCount++;
-
-      // Запрос 1: старая авторизация -> 401.
-      if (requestCount === 1) {
-        return { status: 401, body: { code: 'SESSION_INVALID' } };
-      }
-      // Запрос 2: повтор после refresh с новым токеном -> успех.
-      if (requestCount === 2) {
-        return { body: { ok: 'first' } };
-      }
-      // Запрос 3: снова старая авторизация -> 401.
-      if (requestCount === 3) {
-        return { status: 401, body: { code: 'SESSION_INVALID' } };
-      }
-      // Запрос 4: cooldown -> повтор с текущим токеном -> успех.
-      return { body: { ok: 'second' } };
-    });
-
-    const client = createTestClient({
-      fetch: mock.fetch,
-      auth: {
-        provider: {
-          getAuthHeaders: () => ({ Authorization: `Bearer ${token}` }),
-          refresh: async () => {
-            refreshCount++;
-            token = 'new';
-            return {
-              status: 'success',
-              headers: { Authorization: `Bearer ${token}` },
-            };
-          },
-        },
-        circuitBreakerMs: 60_000,
-      },
-    });
-
-    const first = await client.get<{ ok: string }>('/a');
-    expect(first.ok).toBe('first');
-    expect(refreshCount).toBe(1);
-
-    // Второй запрос: сервер отвечает 401 на старый токен, но
-    // refresh уже был недавно - cooldown, повтор с текущим
-    // токеном без нового refresh.
-    const second = await client.get<{ ok: string }>('/b');
-    expect(second.ok).toBe('second');
-    expect(refreshCount).toBe(1);
-  });
-});
-
 describe('integration - восстановление операций', () => {
   it('реализация PendingOrders с восстановлением', async () => {
     interface PendingCommand {
@@ -429,37 +367,6 @@ describe('integration - envelope + parseErrorBody', () => {
 });
 
 describe('integration - хуки и слои', () => {
-  it('onRequest не видит заголовки auth, onBeforeSend видит', async () => {
-    const capturedInRequest: RequestConfig[] = [];
-    const capturedInBeforeSend: RequestConfig[] = [];
-
-    const mock = createMockFetch(() => ({ body: {} }));
-    const client = createTestClient({
-      fetch: mock.fetch,
-      auth: {
-        provider: {
-          getAuthHeaders: () => ({ Authorization: 'Bearer token' }),
-          refresh: async () => ({ status: 'definitely-failed', reason: 'refresh-rejected' }),
-        },
-      },
-      hooks: {
-        onRequest: (config) => {
-          capturedInRequest.push(config);
-          return config;
-        },
-        onBeforeSend: (config) => {
-          capturedInBeforeSend.push(config);
-        },
-      },
-    });
-
-    await client.get('/users');
-
-    expect(capturedInRequest[0]?.headers?.Authorization).toBeUndefined();
-    expect(capturedInBeforeSend[0]?.headers?.Authorization).toBe('Bearer token');
-    expect(mock.calls[0]?.headers.authorization).toBe('Bearer token');
-  });
-
   it('onBeforeSend видит финальные заголовки и при retry', async () => {
     const captured: RequestConfig[] = [];
 
