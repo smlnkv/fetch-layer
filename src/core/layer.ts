@@ -1,3 +1,5 @@
+import { safeCall } from '../shared/safe-call';
+
 import type { Client, Hooks, RequestFn } from './types';
 
 /**
@@ -132,10 +134,12 @@ export function validateLayerOrder(layers: readonly Layer[], logger?: Logger): v
 
     const stageOwner = seenStages.get(layer.stage);
     if (stageOwner !== undefined) {
-      logger?.warn?.(
-        `[fetch-layer] layers "${stageOwner}" and "${layer.name}" have the same stage ` +
-          `${layer.stage}. Order between them is determined by their position in the ` +
-          `layers array. Use fractional stages (for example 2.5) to avoid ambiguity.`,
+      safeCall(() =>
+        logger?.warn?.(
+          `[fetch-layer] layers "${stageOwner}" and "${layer.name}" have the same stage ` +
+            `${layer.stage}. Order between them is determined by their position in the ` +
+            `layers array. Use fractional stages (for example 2.5) to avoid ambiguity.`,
+        ),
       );
     } else {
       seenStages.set(layer.stage, layer.name);
