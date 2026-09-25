@@ -121,7 +121,11 @@ export function createClient(options: ClientOptions): Client {
         );
       }
 
-      runOnError(options.hooks, finalConfig, error);
+      // Транспорт прикрепляет к ошибке свой финальный конфиг с
+      // Accept и Content-Type. Если ошибка возникла до транспорта,
+      // config остаётся undefined, и onError получает конфиг,
+      // прошедший через onRequest.
+      runOnError(options.hooks, error.config ?? finalConfig, error);
       throw error;
     }
   };

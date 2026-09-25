@@ -1,5 +1,5 @@
 import { buildErrorParser } from '../core/error-body';
-import { ApiError, classifyFetchError } from '../core/errors';
+import { ApiError, classifyFetchError, toApiError } from '../core/errors';
 import { runOnBeforeSend, runOnResponse } from '../core/hooks';
 import { setAbortTimeout, throwIfAborted } from '../shared/signals';
 
@@ -108,6 +108,11 @@ export function createBaseRequest(options: TransportOptions): RequestFn {
       setHeader(headers, 'Content-Type', contentType);
     }
 
+    // Заголовки здесь финальные: с Accept и Content-Type. Тот же
+    // объект видят onBeforeSend и onResponse, он же прикрепляется
+    // к ApiError, возникшей при отправке.
+    const finalConfig: RequestConfig = { ...config, headers };
+
     const effectiveTimeoutMs = config.timeoutMs ?? defaultTimeoutMs;
     const timeout = setAbortTimeout(effectiveTimeoutMs);
 
@@ -138,9 +143,7 @@ export function createBaseRequest(options: TransportOptions): RequestFn {
         (init as RequestInit & { duplex: 'half' }).duplex = 'half';
       }
 
-      // Хук видит финальные заголовки: headers уже содержит Accept
-      // и Content-Type, добавленные транспортом.
-      runOnBeforeSend(hooks, { ...config, headers });
+      runOnBeforeSend(hooks, finalConfig);
 
       // TypeError вокруг fetch означает сетевую ошибку. Только
       // здесь: в остальных местах источник TypeError неизвестен.
@@ -161,7 +164,7 @@ export function createBaseRequest(options: TransportOptions): RequestFn {
       // 204 и 304 - тела нет. Проверяем до response.ok так как
       // 304 не входит в диапазон ok.
       if (response.status === 204 || response.status === 304) {
-        runOnResponse(hooks, config, meta);
+        runOnResponse(hooks, finalConfig, meta);
         if (includeMeta) {
           return { data: undefined, meta } as unknown as T;
         }
@@ -187,7 +190,7 @@ export function createBaseRequest(options: TransportOptions): RequestFn {
 
       // Тело может отсутствовать и при 2xx: HEAD с 200, DELETE без тела.
       if (!response.body) {
-        runOnResponse(hooks, config, meta);
+        runOnResponse(hooks, finalConfig, meta);
         if (includeMeta) {
           return { data: undefined, meta } as unknown as T;
         }
@@ -196,13 +199,19 @@ export function createBaseRequest(options: TransportOptions): RequestFn {
 
       const data = await parseResponse(response, responseType);
 
-      runOnResponse(hooks, config, meta);
+      runOnResponse(hooks, finalConfig, meta);
 
       if (includeMeta) {
         return { data, meta } as unknown as T;
       }
 
       return data as T;
+    } catch (e) {
+      // finalConfig прикрепляется ко всем ошибкам внутри блока:
+      // onError в client.ts увидит тот же конфиг, что и onBeforeSend.
+      const err = toApiError(e);
+      err.config = finalConfig;
+      throw err;
     } finally {
       timeout.clear();
     }

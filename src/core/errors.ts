@@ -1,3 +1,5 @@
+import type { RequestConfig } from './types';
+
 /**
  * Все HTTP-ошибки приводятся к одному классу ApiError, чтобы
  * приложение обрабатывало их в одной точке, а не разбирало
@@ -100,6 +102,15 @@ export class ApiError extends Error {
    * используйте isRetryable.
    */
   readonly isUncertain: boolean;
+
+  /**
+   * Конфиг, отправленный в сеть. Заполняется транспортом для ошибок,
+   * возникших во время сетевого запроса: заголовки здесь финальные,
+   * включая Accept, Content-Type, а также добавленные слоями auth
+   * и идемпотентности. Для ошибок, возникших до транспорта
+   * (например, при сериализации тела или в слое), остаётся undefined.
+   */
+  config?: RequestConfig;
 
   constructor(params: {
     kind: ApiErrorKind;

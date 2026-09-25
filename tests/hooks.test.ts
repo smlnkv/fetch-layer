@@ -200,6 +200,30 @@ describe('onResponse', () => {
     expect(onResponse2).toHaveBeenCalledTimes(1);
   });
 
+  it('видит те же финальные заголовки, что и onBeforeSend', async () => {
+    const captured: Record<string, string>[] = [];
+    const mock = createMockFetch(() => ({ body: {} }));
+    const client = createTestClient({
+      fetch: mock.fetch,
+      auth: {
+        provider: createTestSessionProvider({ headers: { Authorization: 'Bearer token-1' } }),
+      },
+      idempotency: { source: { nextKey: () => 'key-42' } },
+      hooks: {
+        onResponse: (config) => {
+          captured.push(config.headers ?? {});
+        },
+      },
+    });
+
+    await client.post('/orders', { total: 100 });
+
+    expect(captured).toHaveLength(1);
+    expect(captured[0]?.Authorization).toBe('Bearer token-1');
+    expect(captured[0]?.['Idempotency-Key']).toBe('key-42');
+    expect(captured[0]?.['Content-Type']).toBe('application/json');
+  });
+
   it('не вызывается для ошибок', async () => {
     const onResponse = vi.fn();
 
@@ -250,6 +274,78 @@ describe('onError', () => {
     expect(onError2).toHaveBeenCalledTimes(1);
     const [, abortErr] = onError2.mock.calls[0] as [RequestConfig, ApiError];
     expect(abortErr.isCancelled).toBe(true);
+  });
+
+  it('видит финальные заголовки при HTTP-ошибке', async () => {
+    const captured: Record<string, string>[] = [];
+    const mock = createMockFetch(() => ({ status: 500, body: {} }));
+    const client = createTestClient({
+      fetch: mock.fetch,
+      auth: {
+        provider: createTestSessionProvider({ headers: { Authorization: 'Bearer token-1' } }),
+      },
+      idempotency: { source: { nextKey: () => 'key-42' } },
+      hooks: {
+        onError: (config) => {
+          captured.push(config.headers ?? {});
+        },
+      },
+    });
+
+    await expect(client.post('/orders', { total: 100 })).rejects.toBeDefined();
+
+    expect(captured).toHaveLength(1);
+    expect(captured[0]?.Authorization).toBe('Bearer token-1');
+    expect(captured[0]?.['Idempotency-Key']).toBe('key-42');
+    expect(captured[0]?.['Content-Type']).toBe('application/json');
+  });
+
+  it('видит финальные заголовки при сетевой ошибке', async () => {
+    const captured: Record<string, string>[] = [];
+    const mock = createMockFetch(() => {
+      throw new TypeError('Network down');
+    });
+    const client = createTestClient({
+      fetch: mock.fetch,
+      auth: {
+        provider: createTestSessionProvider({ headers: { Authorization: 'Bearer token-1' } }),
+      },
+      hooks: {
+        onError: (config) => {
+          captured.push(config.headers ?? {});
+        },
+      },
+    });
+
+    await expect(client.get('/users')).rejects.toBeDefined();
+
+    expect(captured).toHaveLength(1);
+    expect(captured[0]?.Authorization).toBe('Bearer token-1');
+    expect(captured[0]?.Accept).toBe('application/json');
+  });
+
+  it('при ошибке сериализации тела получает конфиг без финальных заголовков', async () => {
+    // BODY_SERIALIZATION_ERROR возникает до транспорта: prepareBody
+    // отклоняет тело, finalConfig с Accept и Content-Type не успевает
+    // сформироваться. onError получает конфиг после onRequest.
+    const captured: Record<string, string>[] = [];
+    const mock = createMockFetch(() => ({ body: {} }));
+    const client = createTestClient({
+      fetch: mock.fetch,
+      hooks: {
+        onError: (config) => {
+          captured.push(config.headers ?? {});
+        },
+      },
+    });
+
+    await expect(client.post('/orders', { id: 1n })).rejects.toMatchObject({
+      code: 'BODY_SERIALIZATION_ERROR',
+    });
+
+    expect(captured).toHaveLength(1);
+    expect(captured[0]?.Accept).toBeUndefined();
+    expect(captured[0]?.['Content-Type']).toBeUndefined();
   });
 
   it('падение не подменяет исходную ошибку', async () => {
