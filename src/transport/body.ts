@@ -81,9 +81,8 @@ export function isStreamingBody(value: unknown): boolean {
 
 /**
  * Имя типа, у которого JSON.stringify даст {}: перечисляемых свойств
- * нет, и тело доедет до сервера пустым. В prepareBody такие значения
- * отклоняются. Проверка через Object.prototype.toString работает
- * между realm.
+ * нет, и тело доедет до сервера пустым. Проверка через
+ * Object.prototype.toString работает между realm.
  */
 function detectJSONUnfriendlyType(value: unknown): string | null {
   if (value === null || typeof value !== 'object') return null;
@@ -103,6 +102,22 @@ function detectJSONUnfriendlyType(value: unknown): string | null {
       return 'Error';
     default:
       return null;
+  }
+}
+
+/**
+ * Исключение, которое replacer JSON.stringify выбрасывает при
+ * обнаружении неподдерживаемого типа. Отдельный класс отличает эту
+ * ситуацию от других ошибок сериализации (BigInt, циклы): только
+ * здесь известно имя типа, и сообщение об ошибке получает
+ * конкретную подсказку.
+ */
+class UnsupportedBodyTypeError extends TypeError {
+  readonly typeName: string;
+
+  constructor(typeName: string) {
+    super(`Request body contains a ${typeName}`);
+    this.typeName = typeName;
   }
 }
 
@@ -131,7 +146,8 @@ export interface PreparedBody {
  *   не удалось сериализовать в JSON: циклические ссылки, BigInt,
  *   Map, Set, WeakMap, WeakSet, RegExp, Error. Для последних
  *   JSON.stringify вернул бы {}, и сервер получил бы пустой объект
- *   вместо данных.
+ *   вместо данных. Проверка рекурсивная: неподдерживаемый тип
+ *   на любом уровне вложенности отклоняет запрос.
  */
 export function prepareBody(value: unknown): PreparedBody {
   if (value === undefined || value === null) {
@@ -185,27 +201,34 @@ export function prepareBody(value: unknown): PreparedBody {
     return { body: value, contentType: undefined };
   }
 
-  const unsupported = detectJSONUnfriendlyType(value);
-  if (unsupported !== null) {
-    throw new ApiError({
-      kind: 'serialize',
-      code: 'BODY_SERIALIZATION_ERROR',
-      message:
-        `Request body contains a ${unsupported}. ` +
-        `Convert it to a plain object or an array before sending.`,
-    });
-  }
-
   try {
-    const json = JSON.stringify(value);
+    const json = JSON.stringify(value, (_key, val) => {
+      const unsupported = detectJSONUnfriendlyType(val);
+      if (unsupported !== null) {
+        throw new UnsupportedBodyTypeError(unsupported);
+      }
+      return val;
+    });
+
     if (json === undefined) {
       // JSON.stringify(undefined), JSON.stringify(() => {}),
       // JSON.stringify(Symbol()) дают undefined. Значение не должно
       // было попасть сюда, но если это случилось - считаем ошибкой.
       throw new TypeError('JSON.stringify returned undefined');
     }
+
     return { body: json, contentType: 'application/json' };
   } catch (e) {
+    if (e instanceof UnsupportedBodyTypeError) {
+      throw new ApiError({
+        kind: 'serialize',
+        code: 'BODY_SERIALIZATION_ERROR',
+        message:
+          `Request body contains a ${e.typeName}. ` +
+          `Convert it to a plain object or an array before sending.`,
+      });
+    }
+
     throw new ApiError({
       kind: 'serialize',
       code: 'BODY_SERIALIZATION_ERROR',
