@@ -51,7 +51,8 @@ export type QueryArrayFormat = 'repeat' | 'brackets' | 'comma';
 export type QueryObjectFormat = 'brackets' | 'dots';
 
 /**
- * Доступны, если в запросе указано includeResponseMeta: true.
+ * HTTP-метаданные ответа. Возвращаются вместе с телом из
+ * requestWithMeta, head и options.
  */
 export interface ResponseMeta {
   status: number;
@@ -150,10 +151,9 @@ export interface RequestConfig {
   credentials?: RequestCredentials;
 
   /**
-   * Литерал true: при его наличии клиент возвращает { data, meta }
-   * вместо чистых данных. Отсутствие опции означает false. Передача
-   * значения типа boolean не допускается: тип ответа должен быть
-   * известен на этапе компиляции.
+   * Выставляется requestWithMeta, head и options.
+   *
+   * @internal
    */
   includeResponseMeta?: true;
 
@@ -184,7 +184,10 @@ export interface RequestConfig {
  * в методах вида client.get, где path и method задаются самим
  * методом, а body передаётся отдельным аргументом.
  */
-export type RequestOptions = Omit<RequestConfig, 'path' | 'method' | 'body'>;
+export type RequestOptions = Omit<
+  RequestConfig,
+  'path' | 'method' | 'body' | 'includeResponseMeta'
+>;
 
 /**
  * Колбэки для расширения поведения клиента. Все поля опциональны.
@@ -272,72 +275,36 @@ export interface Hooks {
 export type RequestFn = <T = unknown>(config: RequestConfig) => Promise<T>;
 
 /**
- * Две перегрузки: с includeResponseMeta: true возвращается
- * ResponseWithMeta<T>, без него - чистый T.
- *
- * @internal
- */
-interface RequestMethod {
-  <T = unknown>(
-    config: RequestConfig & { includeResponseMeta: true },
-  ): Promise<ResponseWithMeta<T>>;
-  <T = unknown>(config: RequestConfig): Promise<T>;
-}
-
-/**
- * Сигнатура методов без тела: get, head, options.
- *
- * @internal
- */
-interface BodylessMethod {
-  <T = unknown>(
-    path: string,
-    options: RequestOptions & { includeResponseMeta: true },
-  ): Promise<ResponseWithMeta<T>>;
-  <T = unknown>(path: string, options?: RequestOptions): Promise<T>;
-}
-
-/**
- * Сигнатура методов с телом: post, put, patch, delete.
- *
- * @internal
- */
-interface BodyMethod {
-  <T = unknown>(
-    path: string,
-    body: unknown,
-    options: RequestOptions & { includeResponseMeta: true },
-  ): Promise<ResponseWithMeta<T>>;
-  <T = unknown>(path: string, body?: unknown, options?: RequestOptions): Promise<T>;
-}
-
-/**
  * HTTP-клиент. Единственная точка входа в API библиотеки.
  * Создаётся функцией createClient.
  *
- * Все методы поддерживают две формы вызова: без includeResponseMeta
- * возвращают чистые данные, с includeResponseMeta: true - обёртку
- * { data, meta }.
+ * get, post, put, patch, delete возвращают распарсенное тело.
+ * head и options возвращают { data, meta }: тела у них нет,
+ * метаданные - основной результат. requestWithMeta даёт доступ
+ * к метаданным для любого HTTP-метода.
  */
 export interface Client {
-  /** Низкоуровневый запрос. Остальные методы вызывают его. */
-  request: RequestMethod;
+  /** Запрос с любым HTTP-методом. */
+  request: <T = unknown>(config: RequestConfig) => Promise<T>;
 
-  get: BodylessMethod;
-  post: BodyMethod;
-  put: BodyMethod;
-  patch: BodyMethod;
+  /** Запрос с метаданными ответа: { data, meta }. */
+  requestWithMeta: <T = unknown>(config: RequestConfig) => Promise<ResponseWithMeta<T>>;
+
+  get: <T = unknown>(path: string, options?: RequestOptions) => Promise<T>;
+  post: <T = unknown>(path: string, body?: unknown, options?: RequestOptions) => Promise<T>;
+  put: <T = unknown>(path: string, body?: unknown, options?: RequestOptions) => Promise<T>;
+  patch: <T = unknown>(path: string, body?: unknown, options?: RequestOptions) => Promise<T>;
 
   /**
    * Принимает необязательное тело. HTTP-спецификация называет
    * семантику тела в DELETE неопределённой, но многие API
    * (Keycloak, Java HttpClient, Elasticsearch) её поддерживают.
    */
-  delete: BodyMethod;
+  delete: <T = unknown>(path: string, body?: unknown, options?: RequestOptions) => Promise<T>;
 
-  /** Только заголовки, без тела. */
-  head: BodylessMethod;
+  /** Только заголовки. Тела нет, data всегда undefined. */
+  head: (path: string, options?: RequestOptions) => Promise<ResponseWithMeta<undefined>>;
 
-  /** Доступные методы для ресурса. */
-  options: BodylessMethod;
+  /** Доступные методы для ресурса. Тела нет, data всегда undefined. */
+  options: (path: string, options?: RequestOptions) => Promise<ResponseWithMeta<undefined>>;
 }

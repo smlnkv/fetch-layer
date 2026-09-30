@@ -46,8 +46,8 @@ describe('client - Accept по responseType', () => {
   });
 });
 
-describe('client - includeResponseMeta', () => {
-  it('возвращает { data, meta }, если true, чистые данные при отсутствии', async () => {
+describe('client - requestWithMeta', () => {
+  it('возвращает { data, meta } вместо чистого тела', async () => {
     const mock = createMockFetch(() => ({
       status: 201,
       headers: { 'x-request-id': 'req-123' },
@@ -55,30 +55,44 @@ describe('client - includeResponseMeta', () => {
     }));
     const client = createTestClient({ fetch: mock.fetch });
 
-    const withMeta = await client.get<{ id: string }>('/users', {
-      includeResponseMeta: true,
+    const result = await client.requestWithMeta<{ id: string }>({
+      path: '/users',
+      method: 'GET',
     });
-    expect(withMeta.data).toEqual({ id: '1' });
-    expect(withMeta.meta.status).toBe(201);
-    expect(withMeta.meta.requestId).toBe('req-123');
 
-    const withoutMeta = await client.get<{ id: string }>('/users');
-    expect(withoutMeta).toEqual({ id: '1' });
+    expect(result.data).toEqual({ id: '1' });
+    expect(result.meta.status).toBe(201);
+    expect(result.meta.requestId).toBe('req-123');
+  });
+});
+
+describe('client - head и options', () => {
+  it.each([
+    ['HEAD', 'HEAD'],
+    ['OPTIONS', 'OPTIONS'],
+  ] as const)('%s возвращает { data: undefined, meta } с заголовками', async (_, method) => {
+    const mock = createMockFetch(() => ({
+      status: 200,
+      headers: { 'content-length': '1024' },
+    }));
+    const client = createTestClient({ fetch: mock.fetch });
+
+    const result =
+      method === 'HEAD' ? await client.head('/files/report.pdf') : await client.options('/files');
+
+    expect(result.data).toBeUndefined();
+    expect(result.meta.status).toBe(200);
+    expect(result.meta.headers.get('content-length')).toBe('1024');
+    expect(mock.calls[0]?.method).toBe(method);
   });
 });
 
 describe('client - пустые ответы', () => {
-  it('204 возвращает undefined или { data: undefined, meta }', async () => {
+  it('204 возвращает undefined', async () => {
     const mock = createMockFetch(() => ({ status: 204 }));
     const client = createTestClient({ fetch: mock.fetch });
 
     expect(await client.delete('/users/1')).toBeUndefined();
-
-    const withMeta = await client.delete('/users/1', undefined, {
-      includeResponseMeta: true,
-    });
-    expect(withMeta.data).toBeUndefined();
-    expect(withMeta.meta.status).toBe(204);
   });
 
   it('304 не вызывает парсер', async () => {
@@ -438,9 +452,6 @@ describe('client - timeoutMs', () => {
             init.signal?.addEventListener('abort', () => {
               reject(init.signal?.reason ?? new DOMException('Aborted', 'AbortError'));
             });
-            // Mock отвечает через 1000 мс. Клиентский таймаут - 100,
-            // per-request - 2000. Если бы победил клиентский, запрос
-            // упал бы раньше.
             setTimeout(() => resolve({ body: { ok: true } }), 1000);
           }),
       );

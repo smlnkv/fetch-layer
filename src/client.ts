@@ -6,7 +6,14 @@ import { assertNonEmptyString, assertPositiveNumber } from './shared/validators'
 import { createBaseRequest, type TransportOptions } from './transport/transport';
 
 import type { Layer, LayerContext, Logger } from './core/layer';
-import type { Client, HttpMethod, RequestConfig, RequestFn, RequestOptions } from './core/types';
+import type {
+  Client,
+  HttpMethod,
+  RequestConfig,
+  RequestFn,
+  RequestOptions,
+  ResponseWithMeta,
+} from './core/types';
 
 const MIN_TIMEOUT_MS = 100;
 
@@ -190,25 +197,39 @@ function isLayerLike(value: unknown): value is Layer {
  * Сокращённые методы (get, post и другие) вызывают функцию запроса
  * с добавленными path, method и body.
  */
+function makeBodyless(request: RequestFn, method: HttpMethod) {
+  return <T>(path: string, options?: RequestOptions): Promise<T> =>
+    request<T>({ ...options, path, method });
+}
+
+function makeBody(request: RequestFn, method: HttpMethod) {
+  return <T>(path: string, body?: unknown, options?: RequestOptions): Promise<T> =>
+    request<T>({ ...options, path, method, body });
+}
+
+function makeMetaOnly(request: RequestFn, method: 'HEAD' | 'OPTIONS') {
+  return (path: string, options?: RequestOptions): Promise<ResponseWithMeta<undefined>> =>
+    request<ResponseWithMeta<undefined>>({
+      ...options,
+      path,
+      method,
+      includeResponseMeta: true,
+    });
+}
+
 function makeClient(request: RequestFn): Client {
   return {
-    request: request as Client['request'],
-    get: ((path: string, options?: RequestOptions) =>
-      request({ ...options, path, method: 'GET' })) as Client['get'],
-    post: ((path: string, body?: unknown, options?: RequestOptions) =>
-      request({ ...options, path, method: 'POST', body })) as Client['post'],
-    put: ((path: string, body?: unknown, options?: RequestOptions) =>
-      request({ ...options, path, method: 'PUT', body })) as Client['put'],
-    patch: ((path: string, body?: unknown, options?: RequestOptions) =>
-      request({ ...options, path, method: 'PATCH', body })) as Client['patch'],
-    // DELETE принимает тело: спецификация называет его семантику
-    // неопределённой, но многие API (Keycloak, Java HttpClient,
-    // Elasticsearch) это поддерживают.
-    delete: ((path: string, body?: unknown, options?: RequestOptions) =>
-      request({ ...options, path, method: 'DELETE', body })) as Client['delete'],
-    head: ((path: string, options?: RequestOptions) =>
-      request({ ...options, path, method: 'HEAD' })) as Client['head'],
-    options: ((path: string, options?: RequestOptions) =>
-      request({ ...options, path, method: 'OPTIONS' })) as Client['options'],
+    request: <T>(config: RequestConfig) => request<T>(config),
+    requestWithMeta: <T>(config: RequestConfig) =>
+      request<ResponseWithMeta<T>>({ ...config, includeResponseMeta: true }),
+
+    get: makeBodyless(request, 'GET'),
+    post: makeBody(request, 'POST'),
+    put: makeBody(request, 'PUT'),
+    patch: makeBody(request, 'PATCH'),
+    delete: makeBody(request, 'DELETE'),
+
+    head: makeMetaOnly(request, 'HEAD'),
+    options: makeMetaOnly(request, 'OPTIONS'),
   };
 }
