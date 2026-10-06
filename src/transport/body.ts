@@ -8,27 +8,36 @@ import type { ResponseType } from '../core/types';
  * не пройдёт проверку в родительском окне, конструкторы разные.
  * Глобальный конструктор тоже может отсутствовать, поэтому typeof.
  */
-function isFormData(v: unknown): v is FormData {
+function isFormData(value: unknown): value is FormData {
   return (
-    typeof FormData !== 'undefined' && Object.prototype.toString.call(v) === '[object FormData]'
+    typeof FormData !== 'undefined' && Object.prototype.toString.call(value) === '[object FormData]'
   );
 }
 
-function isBlob(v: unknown): v is Blob {
-  return typeof Blob !== 'undefined' && Object.prototype.toString.call(v) === '[object Blob]';
+/**
+ * File расширяет Blob в спецификации, но имеет собственный
+ * Symbol.toStringTag = 'File'. Object.prototype.toString.call(file)
+ * даёт '[object File]', а не '[object Blob]', поэтому проверка
+ * только по тегу Blob пропускает File и он уходит в JSON.stringify
+ * как '{}'. Принимаем оба тега.
+ */
+function isBlob(value: unknown): value is Blob {
+  if (typeof Blob === 'undefined') return false;
+  const tag = Object.prototype.toString.call(value);
+  return tag === '[object Blob]' || tag === '[object File]';
 }
 
-function isArrayBuffer(v: unknown): v is ArrayBuffer {
+function isArrayBuffer(value: unknown): value is ArrayBuffer {
   return (
     typeof ArrayBuffer !== 'undefined' &&
-    Object.prototype.toString.call(v) === '[object ArrayBuffer]'
+    Object.prototype.toString.call(value) === '[object ArrayBuffer]'
   );
 }
 
-function isURLSearchParams(v: unknown): v is URLSearchParams {
+function isURLSearchParams(value: unknown): value is URLSearchParams {
   return (
     typeof URLSearchParams !== 'undefined' &&
-    Object.prototype.toString.call(v) === '[object URLSearchParams]'
+    Object.prototype.toString.call(value) === '[object URLSearchParams]'
   );
 }
 

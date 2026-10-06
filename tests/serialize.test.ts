@@ -122,6 +122,37 @@ describe('stableSerialize - несериализуемые типы', () => {
       expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
     );
   });
+
+  it('File отклоняется как Blob-подобный тип', () => {
+    // Без File в detectUnsupportedType два разных файла получили
+    // бы одинаковый ключ идемпотентности.
+    const file = new File(['content'], 'avatar.png', { type: 'image/png' });
+
+    expect(() => stableSerialize(file)).toThrowError(
+      expect.objectContaining({
+        kind: 'serialize',
+        code: 'BODY_SERIALIZATION_ERROR',
+      }),
+    );
+
+    expect(() => stableSerialize({ avatar: file })).toThrowError(
+      expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
+    );
+
+    expect(() => stableSerialize([file])).toThrowError(
+      expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
+    );
+  });
+
+  it('сообщение об ошибке для File называет тип File, а не Blob', () => {
+    try {
+      stableSerialize(new File(['x'], 'x.bin'));
+      expect.fail('should have thrown');
+    } catch (e) {
+      expect((e as { cause?: unknown }).cause).toBeInstanceOf(TypeError);
+      expect((e as { cause: TypeError }).cause.message).toMatch(/File/);
+    }
+  });
 });
 
 describe('stableSerialize - циклы и общие ссылки', () => {
@@ -196,6 +227,13 @@ describe('isSerializableBody', () => {
     expect(isSerializableBody(new Int32Array([1, 2]))).toBe(false);
     expect(isSerializableBody(new ReadableStream())).toBe(false);
     expect(isSerializableBody(new URLSearchParams({ a: '1' }))).toBe(false);
+  });
+
+  it('false для File', () => {
+    const typedFile = new File(['content'], 'avatar.png', { type: 'image/png' });
+    const untypedFile = new File(['content'], 'unknown.bin');
+    expect(isSerializableBody(typedFile)).toBe(false);
+    expect(isSerializableBody(untypedFile)).toBe(false);
   });
 
   it('false для Map, Set, WeakMap, WeakSet, RegExp, Error', () => {

@@ -395,6 +395,75 @@ describe('idempotency - несериализуемые тела', () => {
       expect(Object.keys(store)).toHaveLength(0);
     }
   });
+
+  it('даёт новый ключ на каждый File и не сохраняет в хранилище', async () => {
+    // Без File в isSerializableBody два разных File получили бы один ключ.
+    const storage = createMemoryStorage();
+    const source = createSessionSource({ storage });
+    const mock = createMockFetch(() => ({ body: { ok: true } }));
+    const client = createIdempotentClient({ fetch: mock.fetch, source });
+
+    const fileA = new File(['aaa'], 'a.png', { type: 'image/png' });
+    const fileB = new File(['bbb'], 'b.png', { type: 'image/png' });
+
+    await client.post('/upload', fileA);
+    await client.post('/upload', fileB);
+
+    expect(keyOf(mock.calls[0])).toBeDefined();
+    expect(keyOf(mock.calls[1])).toBeDefined();
+    expect(keyOf(mock.calls[0])).not.toBe(keyOf(mock.calls[1]));
+
+    const raw = storage.getItem('idempotency:session');
+    const store = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+    expect(Object.keys(store)).toHaveLength(0);
+  });
+
+  it('два POST с разными File и одинаковым scope получают разные ключи', async () => {
+    const seenKeys: string[] = [];
+
+    const mock = createMockFetch((_, init) => {
+      const headers = init.headers as Record<string, string>;
+      seenKeys.push(headers['idempotency-key'] ?? '');
+      return { body: { ok: true } };
+    });
+
+    const source = createSessionSource({ storage: createMemoryStorage() });
+    const client = createIdempotentClient({ fetch: mock.fetch, source });
+
+    const fileA = new File(['aaa'], 'avatar.png', { type: 'image/png' });
+    const fileB = new File(['bbb'], 'avatar.png', { type: 'image/png' });
+
+    await client.post('/upload', fileA, { idempotencyScope: 'avatar' });
+    await client.post('/upload', fileB, { idempotencyScope: 'avatar' });
+
+    expect(seenKeys).toHaveLength(2);
+    expect(seenKeys[0]).toBeDefined();
+    expect(seenKeys[1]).toBeDefined();
+    expect(seenKeys[0]).not.toBe(seenKeys[1]);
+  });
+
+  it('два POST с одинаковым File и одинаковым scope получают разные ключи', async () => {
+    // Даже одинаковые по содержимому File не дедуплицируются:
+    // у них нет стабильного отпечатка, каждый вызов - новый ключ.
+    const seenKeys: string[] = [];
+
+    const mock = createMockFetch((_, init) => {
+      const headers = init.headers as Record<string, string>;
+      seenKeys.push(headers['idempotency-key'] ?? '');
+      return { body: { ok: true } };
+    });
+
+    const source = createSessionSource({ storage: createMemoryStorage() });
+    const client = createIdempotentClient({ fetch: mock.fetch, source });
+
+    const file = new File(['content'], 'avatar.png', { type: 'image/png' });
+
+    await client.post('/upload', file, { idempotencyScope: 'avatar' });
+    await client.post('/upload', file, { idempotencyScope: 'avatar' });
+
+    expect(seenKeys).toHaveLength(2);
+    expect(seenKeys[0]).not.toBe(seenKeys[1]);
+  });
 });
 
 describe('idempotency - ошибки', () => {

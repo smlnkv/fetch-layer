@@ -87,6 +87,24 @@ describe('prepareBody', () => {
     });
   });
 
+  it('File распознаётся как Blob: тело уходит как есть', () => {
+    // File наследуется от Blob в спецификации, но имеет собственный
+    // Symbol.toStringTag = 'File' и потому не проходит проверку
+    // по тегу '[object Blob]'. Без отдельной ветки тело уходило бы
+    // в JSON.stringify и превращалось в '{}'.
+    const typedFile = new File(['content'], 'avatar.png', { type: 'image/png' });
+    expect(prepareBody(typedFile)).toEqual({
+      body: typedFile,
+      contentType: 'image/png',
+    });
+
+    const untypedFile = new File(['content'], 'unknown.bin');
+    expect(prepareBody(untypedFile)).toEqual({
+      body: untypedFile,
+      contentType: 'application/octet-stream',
+    });
+  });
+
   it('ArrayBuffer, TypedArray, DataView', () => {
     const buffer = new ArrayBuffer(8);
     expect(prepareBody(buffer)).toEqual({

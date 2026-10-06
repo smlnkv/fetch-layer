@@ -4,7 +4,7 @@ import { ApiError } from '../../core/errors';
  * Имя типа, для которого стабильный отпечаток невозможен: либо
  * нет перечисляемых свойств (JSON.stringify даёт {}), либо тело
  * отправляется транспортом в собственном формате (FormData, Blob,
- * ArrayBuffer, TypedArray, ReadableStream, URLSearchParams).
+ * File, ArrayBuffer, TypedArray, ReadableStream, URLSearchParams).
  * null для остальных значений.
  *
  * Проверка через Object.prototype.toString, а не instanceof:
@@ -19,6 +19,11 @@ function detectUnsupportedType(value: unknown): string | null {
       return 'FormData';
     case '[object Blob]':
       return 'Blob';
+    // File расширяет Blob, но имеет собственный Symbol.toStringTag
+    // и собственный тег. Разные имена в сообщении об ошибке точнее
+    // отражают, что именно пришло в тело запроса.
+    case '[object File]':
+      return 'File';
     case '[object ArrayBuffer]':
       return 'ArrayBuffer';
     case '[object ReadableStream]':
@@ -50,7 +55,7 @@ function detectUnsupportedType(value: unknown): string | null {
  * true для значений, для которых стабильный отпечаток возможен.
  *
  * undefined и null дают true: отсутствие тела - стабильное состояние.
- * FormData, Blob, ArrayBuffer, TypedArray, ReadableStream,
+ * FormData, Blob, File, ArrayBuffer, TypedArray, ReadableStream,
  * URLSearchParams, Map, Set, WeakMap, WeakSet, RegExp и Error
  * дают false: отпечаток либо невозможен, либо бесполезен
  * (createSessionSource сгенерирует новый ключ без сохранения).
@@ -71,10 +76,10 @@ export function isSerializableBody(value: unknown): boolean {
  *
  * @throws ApiError с кодом BODY_SERIALIZATION_ERROR при циклических
  *   ссылках, BigInt и типах без перечисляемых свойств: FormData,
- *   Blob, ArrayBuffer, TypedArray, ReadableStream, URLSearchParams,
- *   Map, Set, WeakMap, WeakSet, RegExp, Error. Сырой TypeError
- *   нормализуется в тот же код, что и в prepareBody, чтобы
- *   приложение обрабатывало один класс ошибок.
+ *   Blob, File, ArrayBuffer, TypedArray, ReadableStream,
+ *   URLSearchParams, Map, Set, WeakMap, WeakSet, RegExp, Error.
+ *   Сырой TypeError нормализуется в тот же код, что и в prepareBody,
+ *   чтобы приложение обрабатывало один класс ошибок.
  *
  * @public
  * @stableSince 0.1.0
