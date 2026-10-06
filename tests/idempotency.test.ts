@@ -1,3 +1,5 @@
+import { Readable } from 'node:stream';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import { createMemoryStorage, type Client } from '../src/index';
@@ -460,6 +462,75 @@ describe('idempotency - несериализуемые тела', () => {
 
     await client.post('/upload', file, { idempotencyScope: 'avatar' });
     await client.post('/upload', file, { idempotencyScope: 'avatar' });
+
+    expect(seenKeys).toHaveLength(2);
+    expect(seenKeys[0]).not.toBe(seenKeys[1]);
+  });
+
+  it('Node.js stream.Readable не даёт BODY_SERIALIZATION_ERROR и не сохраняется', async () => {
+    // Без isNodeReadableBody в serialize.ts stableSerialize обходил бы
+    // _readableState, находил циклические ссылки и падал с
+    // BODY_SERIALIZATION_ERROR. Запрос не отправлялся.
+    const storage = createMemoryStorage();
+    const source = createSessionSource({ storage });
+    const mock = createMockFetch(() => ({ body: { ok: true } }));
+    const client = createIdempotentClient({ fetch: mock.fetch, source });
+
+    const streamA = Readable.from(['hello']);
+    const streamB = Readable.from(['world']);
+
+    await client.post('/upload', streamA);
+    await client.post('/upload', streamB);
+
+    expect(mock.calls).toHaveLength(2);
+    expect(keyOf(mock.calls[0])).toBeDefined();
+    expect(keyOf(mock.calls[1])).toBeDefined();
+    expect(keyOf(mock.calls[0])).not.toBe(keyOf(mock.calls[1]));
+
+    const raw = storage.getItem('idempotency:session');
+    const store = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+    expect(Object.keys(store)).toHaveLength(0);
+  });
+
+  it('два POST с разными Node-стримами и одинаковым scope получают разные ключи', async () => {
+    const seenKeys: string[] = [];
+
+    const mock = createMockFetch((_, init) => {
+      const headers = init.headers as Record<string, string>;
+      seenKeys.push(headers['idempotency-key'] ?? '');
+      return { body: { ok: true } };
+    });
+
+    const source = createSessionSource({ storage: createMemoryStorage() });
+    const client = createIdempotentClient({ fetch: mock.fetch, source });
+
+    await client.post('/upload', Readable.from(['aaa']), { idempotencyScope: 'upload' });
+    await client.post('/upload', Readable.from(['bbb']), { idempotencyScope: 'upload' });
+
+    expect(seenKeys).toHaveLength(2);
+    expect(seenKeys[0]).not.toBe(seenKeys[1]);
+  });
+
+  it('два POST с одним Node-стримом получают разные ключи', async () => {
+    // Стрим одноразовый: второй POST с тем же объектом отправит
+    // исчерпанный iterator. Здесь проверяем только side effect на
+    // стороне идемпотентности: у стрима нет отпечатка, ключ каждый
+    // раз новый.
+    const seenKeys: string[] = [];
+
+    const mock = createMockFetch((_, init) => {
+      const headers = init.headers as Record<string, string>;
+      seenKeys.push(headers['idempotency-key'] ?? '');
+      return { body: { ok: true } };
+    });
+
+    const source = createSessionSource({ storage: createMemoryStorage() });
+    const client = createIdempotentClient({ fetch: mock.fetch, source });
+
+    const stream = Readable.from(['content']);
+
+    await client.post('/upload', stream, { idempotencyScope: 'upload' });
+    await client.post('/upload', stream, { idempotencyScope: 'upload' });
 
     expect(seenKeys).toHaveLength(2);
     expect(seenKeys[0]).not.toBe(seenKeys[1]);

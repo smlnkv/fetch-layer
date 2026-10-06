@@ -1,6 +1,8 @@
 // Тесты layers/idempotency/serialize.ts: stableSerialize,
 // isSerializableBody.
 
+import { Readable } from 'node:stream';
+
 import { describe, expect, it } from 'vitest';
 
 import { stableSerialize } from '../src/index';
@@ -124,8 +126,8 @@ describe('stableSerialize - несериализуемые типы', () => {
   });
 
   it('File отклоняется как Blob-подобный тип', () => {
-    // Без File в detectUnsupportedType два разных файла получили
-    // бы одинаковый ключ идемпотентности.
+    // Без File в detectUnsupportedType два разных файла получили бы
+    // одинаковый ключ идемпотентности.
     const file = new File(['content'], 'avatar.png', { type: 'image/png' });
 
     expect(() => stableSerialize(file)).toThrowError(
@@ -151,6 +153,39 @@ describe('stableSerialize - несериализуемые типы', () => {
     } catch (e) {
       expect((e as { cause?: unknown }).cause).toBeInstanceOf(TypeError);
       expect((e as { cause: TypeError }).cause.message).toMatch(/File/);
+    }
+  });
+
+  it('Node.js stream.Readable отклоняется до обхода _readableState', () => {
+    // Без isNodeReadableBody stableSerialize обходил бы enumerable-
+    // свойства _readableState, находил там циклические ссылки и падал
+    // с 'Converting circular structure to JSON'. Пользователь видел
+    // BODY_SERIALIZATION_ERROR без указания, что проблема в стриме.
+    const readable = Readable.from(['hello', 'world']);
+
+    expect(() => stableSerialize(readable)).toThrowError(
+      expect.objectContaining({
+        kind: 'serialize',
+        code: 'BODY_SERIALIZATION_ERROR',
+      }),
+    );
+
+    expect(() => stableSerialize({ stream: readable })).toThrowError(
+      expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
+    );
+
+    expect(() => stableSerialize([readable])).toThrowError(
+      expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
+    );
+  });
+
+  it('сообщение об ошибке для Node.js stream называет тип NodeReadable', () => {
+    try {
+      stableSerialize(Readable.from(['x']));
+      expect.fail('should have thrown');
+    } catch (e) {
+      expect((e as { cause?: unknown }).cause).toBeInstanceOf(TypeError);
+      expect((e as { cause: TypeError }).cause.message).toMatch(/NodeReadable/);
     }
   });
 });
@@ -234,6 +269,11 @@ describe('isSerializableBody', () => {
     const untypedFile = new File(['content'], 'unknown.bin');
     expect(isSerializableBody(typedFile)).toBe(false);
     expect(isSerializableBody(untypedFile)).toBe(false);
+  });
+
+  it('false для Node.js stream.Readable', () => {
+    expect(isSerializableBody(Readable.from(['x']))).toBe(false);
+    expect(isSerializableBody(Readable.from([]))).toBe(false);
   });
 
   it('false для Map, Set, WeakMap, WeakSet, RegExp, Error', () => {

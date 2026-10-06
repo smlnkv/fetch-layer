@@ -2,8 +2,9 @@ import { buildErrorParser } from '../core/error-body';
 import { ApiError, classifyFetchError, toApiError } from '../core/errors';
 import { runOnBeforeSend, runOnResponse } from '../core/hooks';
 import { setAbortTimeout, throwIfAborted } from '../shared/signals';
+import { isStreamingBody } from '../shared/streams';
 
-import { isStreamingBody, parseResponse, prepareBody, readBodyAsJsonOrText } from './body';
+import { parseResponse, prepareBody, readBodyAsJsonOrText } from './body';
 import { getHeader, mergeHeaders, setHeader } from './headers';
 import { parseRetryAfterMs } from './retry-after';
 import { buildUrl } from './url';
@@ -108,7 +109,7 @@ export function createBaseRequest(options: TransportOptions): RequestFn {
       setHeader(headers, 'Content-Type', contentType);
     }
 
-    // Заголовки здесь финальные: с Accept и Content-Type. Тот же
+    // Финальные заголовки, с Accept и Content-Type. Тот же
     // объект видят onBeforeSend и onResponse, он же прикрепляется
     // к ApiError, возникшей при отправке.
     const finalConfig: RequestConfig = { ...config, headers };

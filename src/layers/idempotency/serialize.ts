@@ -1,11 +1,12 @@
 import { ApiError } from '../../core/errors';
+import { isNodeReadableBody } from '../../shared/streams';
 
 /**
  * Имя типа, для которого стабильный отпечаток невозможен: либо
  * нет перечисляемых свойств (JSON.stringify даёт {}), либо тело
  * отправляется транспортом в собственном формате (FormData, Blob,
- * File, ArrayBuffer, TypedArray, ReadableStream, URLSearchParams).
- * null для остальных значений.
+ * File, ArrayBuffer, TypedArray, ReadableStream, Node.js stream,
+ * URLSearchParams). null для остальных значений.
  *
  * Проверка через Object.prototype.toString, а не instanceof:
  * instanceof не работает между realm, а тела часто приходят
@@ -48,6 +49,15 @@ function detectUnsupportedType(value: unknown): string | null {
     return 'TypedArray';
   }
 
+  // Node.js stream.Readable не имеет собственного Symbol.toStringTag
+  // в Object.prototype.toString и требует duck-typing. Транспорт
+  // умеет его отправлять (duplex: 'half', async iterable), но
+  // стабильный отпечаток невозможен: поток одноразовый и не
+  // сериализуется.
+  if (isNodeReadableBody(value)) {
+    return 'NodeReadable';
+  }
+
   return null;
 }
 
@@ -56,9 +66,10 @@ function detectUnsupportedType(value: unknown): string | null {
  *
  * undefined и null дают true: отсутствие тела - стабильное состояние.
  * FormData, Blob, File, ArrayBuffer, TypedArray, ReadableStream,
- * URLSearchParams, Map, Set, WeakMap, WeakSet, RegExp и Error
- * дают false: отпечаток либо невозможен, либо бесполезен
- * (createSessionSource сгенерирует новый ключ без сохранения).
+ * Node.js stream.Readable, URLSearchParams, Map, Set, WeakMap,
+ * WeakSet, RegExp и Error дают false: отпечаток либо невозможен,
+ * либо бесполезен (createSessionSource сгенерирует новый ключ
+ * без сохранения).
  */
 export function isSerializableBody(value: unknown): boolean {
   if (value === undefined || value === null) return true;
@@ -77,9 +88,10 @@ export function isSerializableBody(value: unknown): boolean {
  * @throws ApiError с кодом BODY_SERIALIZATION_ERROR при циклических
  *   ссылках, BigInt и типах без перечисляемых свойств: FormData,
  *   Blob, File, ArrayBuffer, TypedArray, ReadableStream,
- *   URLSearchParams, Map, Set, WeakMap, WeakSet, RegExp, Error.
- *   Сырой TypeError нормализуется в тот же код, что и в prepareBody,
- *   чтобы приложение обрабатывало один класс ошибок.
+ *   Node.js stream.Readable, URLSearchParams, Map, Set, WeakMap,
+ *   WeakSet, RegExp, Error. Сырой TypeError нормализуется в тот же
+ *   код, что и в prepareBody, чтобы приложение обрабатывало один
+ *   класс ошибок.
  *
  * @public
  * @stableSince 0.1.0
