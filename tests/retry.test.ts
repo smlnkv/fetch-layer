@@ -1,12 +1,14 @@
 // Тесты retry-слоя через createClient.
 
+import { Readable } from 'node:stream';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import { withRetry } from '../src/layers/index';
 
 import { createMockFetch, createTestClient } from './helpers';
 
-import type { ApiError, Client } from '../src/index';
+import type { ApiError, Client, Logger } from '../src/index';
 
 const createSleepSpy = () =>
   vi.fn<(ms: number, signal?: AbortSignal) => Promise<void>>(() => Promise.resolve());
@@ -25,6 +27,7 @@ interface RetryClientOptions {
   jitterRatio?: number;
   retryOnNetwork?: boolean;
   retryOnTimeout?: boolean;
+  logger?: Logger;
 }
 
 function createRetryClient(options: RetryClientOptions): Client {
@@ -42,6 +45,7 @@ function createRetryClient(options: RetryClientOptions): Client {
       retryOnNetwork: options.retryOnNetwork,
       retryOnTimeout: options.retryOnTimeout,
     },
+    logger: options.logger,
   });
 }
 
@@ -749,5 +753,97 @@ describe('retry - onRetry hook', () => {
     });
 
     await expect(client.get('/users')).rejects.toMatchObject({ status: 500 });
+  });
+});
+
+describe('retry - потоковые тела', () => {
+  it('не повторяет Web ReadableStream при сетевой ошибке', async () => {
+    let attempts = 0;
+    const mock = createMockFetch(() => {
+      attempts++;
+      throw new TypeError('Network down');
+    });
+    const warn = vi.fn();
+    const client = createRetryClient({
+      fetch: mock.fetch,
+      maxAttempts: 3,
+      sleep: noSleep,
+      logger: { warn },
+    });
+
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('data'));
+        controller.close();
+      },
+    });
+
+    await expect(client.post('/upload', stream)).rejects.toMatchObject({
+      kind: 'network',
+      code: 'NETWORK_ERROR',
+    });
+
+    expect(attempts).toBe(1);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]?.[0]).toMatch(/stream/);
+  });
+
+  it('не повторяет Node.js stream.Readable при 5xx', async () => {
+    let attempts = 0;
+    const mock = createMockFetch(() => {
+      attempts++;
+      return { status: 500, body: {} };
+    });
+    const client = createRetryClient({
+      fetch: mock.fetch,
+      maxAttempts: 3,
+      sleep: noSleep,
+    });
+
+    await expect(client.post('/upload', Readable.from(['data']))).rejects.toMatchObject({
+      status: 500,
+    });
+    expect(attempts).toBe(1);
+  });
+
+  it('warn про стрим выводится один раз на клиент', async () => {
+    const mock = createMockFetch(() => {
+      throw new TypeError('Network down');
+    });
+    const warn = vi.fn();
+    const client = createRetryClient({
+      fetch: mock.fetch,
+      maxAttempts: 3,
+      sleep: noSleep,
+      logger: { warn },
+    });
+
+    await expect(client.post('/upload', Readable.from(['a']))).rejects.toBeDefined();
+    await expect(client.post('/upload', Readable.from(['b']))).rejects.toBeDefined();
+    await expect(client.post('/upload', Readable.from(['c']))).rejects.toBeDefined();
+
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('skipRetry: true отключает и warn про стрим', async () => {
+    let attempts = 0;
+    const mock = createMockFetch(() => {
+      attempts++;
+      throw new TypeError('Network down');
+    });
+    const warn = vi.fn();
+    const client = createRetryClient({
+      fetch: mock.fetch,
+      maxAttempts: 3,
+      sleep: noSleep,
+      logger: { warn },
+    });
+
+    await expect(
+      client.post('/upload', Readable.from(['a']), { skipRetry: true }),
+    ).rejects.toBeDefined();
+
+    expect(attempts).toBe(1);
+    expect(warn).not.toHaveBeenCalled();
   });
 });

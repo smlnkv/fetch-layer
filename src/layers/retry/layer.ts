@@ -3,6 +3,7 @@ import { runOnRetry } from '../../core/hooks';
 import { isMutatingMethod } from '../../shared/method';
 import { safeCall } from '../../shared/safe-call';
 import { sleep as defaultSleep, throwIfAborted } from '../../shared/signals';
+import { isStreamingBody } from '../../shared/streams';
 import {
   assertInteger,
   assertNonNegativeNumber,
@@ -124,6 +125,10 @@ function rootSegment(path: string): string {
  * задержки. Если значение больше maxDelayMs, повтор не выполняется:
  * сервер просит подождать дольше, чем приложение готово ждать.
  *
+ * Для потоковых тел (Web ReadableStream, Node.js stream.Readable)
+ * повторы отключены: поток одноразовый, повторный fetch бросит
+ * TypeError, который транспорт классифицирует как сетевую ошибку.
+ *
  * @throws Error если параметры конфигурации некорректны.
  */
 export function withRetry(options: RetryOptions = {}): Layer {
@@ -185,10 +190,29 @@ export function withRetry(options: RetryOptions = {}): Layer {
         safeCall(() => logger?.warn?.(message));
       };
 
+      let warnedStreamNoRetry = false;
+
       const fn: RequestFn = async function retryRequest<T>(
         initialConfig: RequestConfig,
       ): Promise<T> {
         if (initialConfig.skipRetry) {
+          return next<T>(initialConfig);
+        }
+
+        // Стрим одноразовый: fetch забирает его при первой отправке,
+        // повторная выбрасывает TypeError. Транспорт классифицирует
+        // его как network error, что маскирует настоящую причину.
+        if (isStreamingBody(initialConfig.body)) {
+          if (!warnedStreamNoRetry) {
+            warnedStreamNoRetry = true;
+            safeCall(() =>
+              logger?.warn?.(
+                '[fetch-layer] withRetry is enabled, but the request body is a stream. ' +
+                  'Streams are single-use; retries are disabled for this request. ' +
+                  'Use skipRetry: true to silence this warning, or pre-buffer the stream.',
+              ),
+            );
+          }
           return next<T>(initialConfig);
         }
 
