@@ -87,6 +87,9 @@ export interface Layer {
    * которым нужен сам клиент (например, resetRefreshCircuit).
    *
    * state - то, что этот же слой вернул из wrap для данного клиента.
+   *
+   * Исключение из attach прерывает createClient. Сообщение об
+   * ошибке включает имя слоя.
    */
   attach?(client: Client, state: unknown): void;
 }
@@ -178,6 +181,10 @@ export function applyLayers(
  * Порядок вызова совпадает с порядком в массиве. state берётся
  * из соответствующей позиции.
  *
+ * Падение attach прерывает createClient. Ошибка включает имя слоя,
+ * чтобы приложение знало, кто именно сломал создание клиента.
+ * Оригинальное исключение доступно через cause.
+ *
  * @internal
  */
 export function runAttach(
@@ -186,6 +193,14 @@ export function runAttach(
   client: Client,
 ): void {
   for (let i = 0; i < layers.length; i++) {
-    layers[i]!.attach?.(client, states[i]);
+    const layer = layers[i]!;
+    try {
+      layer.attach?.(client, states[i]);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      throw new Error(`createClient: layer "${layer.name}" attach threw: ${message}`, {
+        cause: e,
+      });
+    }
   }
 }

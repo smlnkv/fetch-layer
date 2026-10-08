@@ -140,6 +140,35 @@ describe('validateLayerOrder - дубликаты', () => {
   });
 });
 
+describe('runAttach', () => {
+  it('падение attach даёт ошибку с именем слоя и cause', () => {
+    const original = new Error('boom');
+    const withBrokenAttach: Layer = {
+      name: 'withBrokenAttach',
+      wrap: (next) => ({ fn: next }),
+      attach() {
+        throw original;
+      },
+    };
+
+    let caught: unknown;
+    try {
+      createClient({
+        baseUrl: '/api',
+        layers: [withBrokenAttach],
+      });
+    } catch (e) {
+      caught = e;
+    }
+
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toMatch(/withBrokenAttach/);
+    expect((caught as Error).message).toMatch(/attach threw/);
+    expect((caught as Error).message).toMatch(/boom/);
+    expect((caught as Error).cause).toBe(original);
+  });
+});
+
 describe('Layer как шаблон', () => {
   it('withAuth создаёт независимый RefreshManager на каждый клиент', async () => {
     let refreshCalls = 0;
