@@ -696,11 +696,17 @@ describe('client - валидация', () => {
     const mock = createMockFetch(() => ({ body: {} }));
     const client = createTestClient({ fetch: mock.fetch });
 
-    await expect(client.get('/users', { timeoutMs: -1 })).rejects.toThrow(/client: timeoutMs/);
-    await expect(client.get('/users', { timeoutMs: 0 })).rejects.toThrow(/client: timeoutMs/);
-    await expect(client.get('/users', { timeoutMs: NaN })).rejects.toThrow(/client: timeoutMs/);
+    await expect(client.get('/users', { timeoutMs: -1 })).rejects.toThrow(
+      /client: timeoutMs must be a number >= 100 ms/,
+    );
+    await expect(client.get('/users', { timeoutMs: 0 })).rejects.toThrow(
+      /client: timeoutMs must be a number >= 100 ms/,
+    );
+    await expect(client.get('/users', { timeoutMs: NaN })).rejects.toThrow(
+      /client: timeoutMs must be a number >= 100 ms/,
+    );
     await expect(client.get('/users', { timeoutMs: 50 })).rejects.toThrow(
-      /client: timeoutMs must be at least 100 ms/,
+      /client: timeoutMs must be a number >= 100 ms/,
     );
 
     expect(mock.calls).toHaveLength(0);
@@ -733,8 +739,12 @@ describe('createClient - валидация', () => {
   it('ошибка конфигурации при пустом baseUrl или невалидном timeoutMs', () => {
     expect(() => createClient({ baseUrl: '' })).toThrow(/baseUrl/);
     expect(() => createClient({ baseUrl: null as unknown as string })).toThrow(/baseUrl/);
-    expect(() => createClient({ baseUrl: '/api', timeoutMs: -1 })).toThrow(/timeoutMs/);
-    expect(() => createClient({ baseUrl: '/api', timeoutMs: 50 })).toThrow(/timeoutMs/);
+    expect(() => createClient({ baseUrl: '/api', timeoutMs: -1 })).toThrow(
+      /createClient: timeoutMs must be a number >= 100 ms/,
+    );
+    expect(() => createClient({ baseUrl: '/api', timeoutMs: 50 })).toThrow(
+      /createClient: timeoutMs must be a number >= 100 ms/,
+    );
     expect(() => createClient({ baseUrl: '/api', timeoutMs: 5000 })).not.toThrow();
   });
 

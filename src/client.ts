@@ -2,7 +2,7 @@ import { toApiError } from './core/errors';
 import { runOnError, runOnRequest } from './core/hooks';
 import { applyLayers, runAttach, validateLayerOrder } from './core/layer';
 import { safeCall } from './shared/safe-call';
-import { assertNonEmptyString, assertPositiveNumber } from './shared/validators';
+import { assertNonEmptyString } from './shared/validators';
 import { mergeHeaders } from './transport/headers';
 import { createBaseRequest, type TransportOptions } from './transport/transport';
 
@@ -68,14 +68,27 @@ function resolveConfig(config: RequestConfig): ResolvedRequestConfig {
 }
 
 /**
+ * Единая проверка timeoutMs: значение должно быть числом не меньше
+ * MIN_TIMEOUT_MS. Отдельная от assertPositiveNumber, потому что
+ * та даёт другое сообщение и другой порог.
+ */
+function assertTimeout(value: unknown, prefix: string): asserts value is number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < MIN_TIMEOUT_MS) {
+    throw new Error(
+      `${prefix}: timeoutMs must be a number >= ${MIN_TIMEOUT_MS} ms, got ${String(value)}`,
+    );
+  }
+}
+
+/**
  * Собирает pipeline из базового транспорта и слоёв, валидирует
  * порядок. Поверх pipeline - обёртка с onRequest (один раз
  * на операцию) и onError (один раз на финальную ошибку).
  *
  * @throws Error если конфигурация некорректна: пустой baseUrl,
- *   неположительный или слишком маленький timeoutMs, недоступный
- *   fetch, layers не массив, нарушение порядка слоёв, дубликаты
- *   имён, дубликаты stage.
+ *   невалидный или слишком маленький timeoutMs, недоступный fetch,
+ *   layers не массив, нарушение порядка слоёв, дубликаты имён,
+ *   дубликаты stage.
  */
 export function createClient(options: ClientOptions): Client {
   validateOptions(options);
@@ -101,10 +114,7 @@ export function createClient(options: ClientOptions): Client {
     assertNonEmptyString(hooked.path, 'client: path');
 
     if (hooked.timeoutMs !== undefined) {
-      assertPositiveNumber(hooked.timeoutMs, 'client: timeoutMs');
-      if (hooked.timeoutMs < MIN_TIMEOUT_MS) {
-        throw new Error(`client: timeoutMs must be at least ${MIN_TIMEOUT_MS} ms`);
-      }
+      assertTimeout(hooked.timeoutMs, 'client');
     }
 
     // Нормализуем метод до верхнего регистра: слои (withIdempotency,
@@ -139,10 +149,10 @@ export function createClient(options: ClientOptions): Client {
         );
       }
 
-      // Транспорт прикрепляет к ошибке свой финальный конфиг с
-      // Accept и Content-Type. Если ошибка возникла до транспорта,
-      // config остаётся undefined, и onError получает конфиг,
-      // прошедший через onRequest.
+      // err.config выставляется транспортом для ошибок внутри try.
+      // Для ошибок до try (сериализация тела, pre-abort) остаётся
+      // undefined, и onError получает конфиг после onRequest,
+      // без финальных заголовков Accept и Content-Type.
       runOnError(options.hooks, error.config ?? finalConfig, error);
       throw error;
     }
@@ -162,10 +172,7 @@ function validateOptions(options: ClientOptions): void {
   assertNonEmptyString(options.baseUrl, 'createClient: baseUrl');
 
   if (options.timeoutMs !== undefined) {
-    assertPositiveNumber(options.timeoutMs, 'createClient: timeoutMs');
-    if (options.timeoutMs < MIN_TIMEOUT_MS) {
-      throw new Error(`createClient: timeoutMs must be at least ${MIN_TIMEOUT_MS} ms`);
-    }
+    assertTimeout(options.timeoutMs, 'createClient');
   }
 
   const fetchImpl = options.fetch ?? globalThis.fetch;
