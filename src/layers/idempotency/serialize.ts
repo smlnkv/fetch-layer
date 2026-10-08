@@ -1,97 +1,21 @@
 import { ApiError } from '../../core/errors';
-import { isNodeReadableBody } from '../../shared/streams';
-
-/**
- * Имя типа, для которого стабильный отпечаток невозможен: либо
- * нет перечисляемых свойств (JSON.stringify даёт {}), либо тело
- * отправляется транспортом в собственном формате (FormData, Blob,
- * File, ArrayBuffer, TypedArray, ReadableStream, Node.js stream,
- * URLSearchParams). null для остальных значений.
- *
- * Проверка через Object.prototype.toString, а не instanceof:
- * instanceof не работает между realm, а тела часто приходят
- * из iframe или worker. ArrayBuffer.isView cross-realm.
- */
-function detectUnsupportedType(value: unknown): string | null {
-  if (value === null || typeof value !== 'object') return null;
-
-  switch (Object.prototype.toString.call(value)) {
-    case '[object FormData]':
-      return 'FormData';
-    case '[object Blob]':
-      return 'Blob';
-    // File расширяет Blob, но имеет собственный Symbol.toStringTag
-    // и собственный тег. Разные имена в сообщении об ошибке точнее
-    // отражают, что именно пришло в тело запроса.
-    case '[object File]':
-      return 'File';
-    case '[object ArrayBuffer]':
-      return 'ArrayBuffer';
-    case '[object ReadableStream]':
-      return 'ReadableStream';
-    case '[object URLSearchParams]':
-      return 'URLSearchParams';
-    case '[object Map]':
-      return 'Map';
-    case '[object Set]':
-      return 'Set';
-    case '[object WeakMap]':
-      return 'WeakMap';
-    case '[object WeakSet]':
-      return 'WeakSet';
-    case '[object RegExp]':
-      return 'RegExp';
-    case '[object Error]':
-      return 'Error';
-  }
-
-  if (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(value)) {
-    return 'TypedArray';
-  }
-
-  // Node.js stream.Readable не имеет собственного Symbol.toStringTag
-  // в Object.prototype.toString и требует duck-typing. Транспорт
-  // умеет его отправлять (duplex: 'half', async iterable), но
-  // стабильный отпечаток невозможен: поток одноразовый и не
-  // сериализуется.
-  if (isNodeReadableBody(value)) {
-    return 'NodeReadable';
-  }
-
-  return null;
-}
-
-/**
- * true для значений, для которых стабильный отпечаток возможен.
- *
- * undefined и null дают true: отсутствие тела - стабильное состояние.
- * FormData, Blob, File, ArrayBuffer, TypedArray, ReadableStream,
- * Node.js stream.Readable, URLSearchParams, Map, Set, WeakMap,
- * WeakSet, RegExp и Error дают false: отпечаток либо невозможен,
- * либо бесполезен (createSessionSource сгенерирует новый ключ
- * без сохранения).
- */
-export function isSerializableBody(value: unknown): boolean {
-  if (value === undefined || value === null) return true;
-  return detectUnsupportedType(value) === null;
-}
+import { bodyKindName, classifyBody, isSerializableKind } from '../../shared/classify-body';
 
 /**
  * Стабильная сериализация значения. Ключи объектов сортируются
  * в алфавитном порядке, поэтому результат не зависит от порядка
  * вставки. В остальном поведение совпадает с JSON.stringify.
  *
- * Тот же алгоритм, что использует встроенный createSessionSource
- * для отпечатков тел. Совпадает с ним по формату, поэтому подходит
- * для кастомных IdempotencySource.
+ * Правило допустимых типов то же, что у prepareBody в транспорте:
+ * значение должно быть сериализуемо в JSON как есть и после вызова
+ * toJSON. Иначе два разных тела получили бы одинаковый отпечаток
+ * и, значит, один ключ идемпотентности.
  *
  * @throws ApiError с кодом BODY_SERIALIZATION_ERROR при циклических
- *   ссылках, BigInt и типах без перечисляемых свойств: FormData,
- *   Blob, File, ArrayBuffer, TypedArray, ReadableStream,
- *   Node.js stream.Readable, URLSearchParams, Map, Set, WeakMap,
- *   WeakSet, RegExp, Error. Сырой TypeError нормализуется в тот же
- *   код, что и в prepareBody, чтобы приложение обрабатывало один
- *   класс ошибок.
+ *   ссылках, BigInt и типах, не сериализуемых в JSON: FormData, Blob,
+ *   File, ArrayBuffer, TypedArray, ReadableStream, Node.js
+ *   stream.Readable, URLSearchParams, Map, Set, WeakMap, WeakSet,
+ *   RegExp, Error.
  *
  * @public
  * @stableSince 0.1.0
@@ -125,9 +49,9 @@ export function stableSerialize(value: unknown): string {
 function serialize(value: unknown, seen: WeakSet<object>): string {
   // Проверка до toJSON: контракт "несериализуемые типы отклоняются"
   // не должен обходиться через пользовательский toJSON.
-  const unsupported = detectUnsupportedType(value);
-  if (unsupported !== null) {
-    throw new TypeError(`Cannot serialize ${unsupported} to a stable JSON string`);
+  const kind = classifyBody(value);
+  if (!isSerializableKind(kind)) {
+    throw new TypeError(`Cannot serialize ${bodyKindName(kind)} to a stable JSON string`);
   }
 
   // Как в JSON.stringify: позволяет работать с Date, URL и другими
@@ -136,6 +60,15 @@ function serialize(value: unknown, seen: WeakSet<object>): string {
     const toJSON = (value as { toJSON?: () => unknown }).toJSON;
     if (typeof toJSON === 'function') {
       value = toJSON.call(value);
+
+      // Повторная проверка после toJSON, как в prepareJsonBody.
+      // toJSON может вернуть Map, Set, Blob или другой несериализуемый
+      // тип. Без этой проверки значение прошло бы через рекурсию
+      // и превратилось в {}, дав одинаковый отпечаток разным телам.
+      const afterKind = classifyBody(value);
+      if (!isSerializableKind(afterKind)) {
+        throw new TypeError(`toJSON returned ${bodyKindName(afterKind)}: cannot serialize`);
+      }
     }
   }
 

@@ -1,8 +1,8 @@
 import { buildErrorParser } from '../core/error-body';
 import { ApiError, classifyFetchError, toApiError } from '../core/errors';
 import { runOnBeforeSend, runOnResponse } from '../core/hooks';
+import { isStreamingBody } from '../shared/classify-body';
 import { setAbortTimeout, throwIfAborted } from '../shared/signals';
-import { isStreamingBody } from '../shared/streams';
 
 import { parseResponse, prepareBody, readBodyAsJsonOrText } from './body';
 import { getHeader, mergeHeaders, setHeader } from './headers';
@@ -104,6 +104,11 @@ export function createBaseRequest(options: TransportOptions): RequestFn {
 
     const headers = mergeHeaders({ Accept: defaultAccept }, config.headers);
 
+    // prepareBody вне try: ошибка сериализации тела не должна
+    // получать finalConfig. Финальные заголовки к этому моменту
+    // ещё не сформированы, и onError по контракту видит конфиг
+    // после onRequest, без Accept и Content-Type. client.ts
+    // подставляет его через error.config ?? finalConfig.
     const { body, contentType } = prepareBody(config.body);
     if (contentType !== undefined && getHeader(headers, 'Content-Type') === undefined) {
       setHeader(headers, 'Content-Type', contentType);
@@ -111,7 +116,7 @@ export function createBaseRequest(options: TransportOptions): RequestFn {
 
     // Финальные заголовки, с Accept и Content-Type. Тот же
     // объект видят onBeforeSend и onResponse, он же прикрепляется
-    // к ApiError, возникшей при отправке.
+    // к ApiError, возникшей внутри try.
     const finalConfig: RequestConfig = { ...config, headers };
 
     const effectiveTimeoutMs = config.timeoutMs ?? defaultTimeoutMs;
@@ -210,6 +215,9 @@ export function createBaseRequest(options: TransportOptions): RequestFn {
     } catch (e) {
       // finalConfig прикрепляется ко всем ошибкам внутри блока:
       // onError в client.ts увидит тот же конфиг, что и onBeforeSend.
+      // Для ошибок до try (сериализация тела, pre-abort) err.config
+      // остаётся undefined, и client.ts использует фолбэк на конфиг
+      // после onRequest.
       const err = toApiError(e);
       err.config = finalConfig;
       throw err;

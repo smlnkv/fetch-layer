@@ -1,87 +1,30 @@
 import { ApiError } from '../core/errors';
-import { isNodeReadableBody, isReadableStreamBody } from '../shared/streams';
+import {
+  bodyKindName,
+  classifyBody,
+  isSerializableKind,
+  isUnsupportedKind,
+} from '../shared/classify-body';
 
 import type { ResponseType } from '../core/types';
 
-/**
- * Проверки типов через Object.prototype.toString, а не instanceof:
- * instanceof не работает между realm - FormData из iframe или worker
- * не пройдёт проверку в родительском окне, конструкторы разные.
- * Глобальный конструктор тоже может отсутствовать, поэтому typeof.
- */
-function isFormData(value: unknown): value is FormData {
-  return (
-    typeof FormData !== 'undefined' && Object.prototype.toString.call(value) === '[object FormData]'
-  );
-}
-
-/**
- * File расширяет Blob в спецификации, но имеет собственный
- * Symbol.toStringTag = 'File'. Object.prototype.toString.call(file)
- * даёт '[object File]', а не '[object Blob]', поэтому проверка
- * только по тегу Blob пропускает File и он уходит в JSON.stringify
- * как '{}'. Принимаем оба тега.
- */
-function isBlob(value: unknown): value is Blob {
-  if (typeof Blob === 'undefined') return false;
-  const tag = Object.prototype.toString.call(value);
-  return tag === '[object Blob]' || tag === '[object File]';
-}
-
-function isArrayBuffer(value: unknown): value is ArrayBuffer {
-  return (
-    typeof ArrayBuffer !== 'undefined' &&
-    Object.prototype.toString.call(value) === '[object ArrayBuffer]'
-  );
-}
-
-function isURLSearchParams(value: unknown): value is URLSearchParams {
-  return (
-    typeof URLSearchParams !== 'undefined' &&
-    Object.prototype.toString.call(value) === '[object URLSearchParams]'
-  );
-}
-
-/**
- * Имя типа, у которого JSON.stringify даст {}: перечисляемых свойств
- * нет, и тело доедет до сервера пустым. Проверка через
- * Object.prototype.toString работает между realm.
- */
-function detectJSONUnfriendlyType(value: unknown): string | null {
-  if (value === null || typeof value !== 'object') return null;
-
-  switch (Object.prototype.toString.call(value)) {
-    case '[object Map]':
-      return 'Map';
-    case '[object Set]':
-      return 'Set';
-    case '[object WeakMap]':
-      return 'WeakMap';
-    case '[object WeakSet]':
-      return 'WeakSet';
-    case '[object RegExp]':
-      return 'RegExp';
-    case '[object Error]':
-      return 'Error';
-    default:
-      return null;
-  }
-}
-
-/**
- * Исключение, которое replacer JSON.stringify выбрасывает при
- * обнаружении неподдерживаемого типа. Отдельный класс отличает эту
- * ситуацию от других ошибок сериализации (BigInt, циклы): только
- * здесь известно имя типа, и сообщение об ошибке получает
- * конкретную подсказку.
- */
 class UnsupportedBodyTypeError extends TypeError {
   readonly typeName: string;
 
   constructor(typeName: string) {
-    super(`Request body contains a ${typeName}`);
+    super('Unsupported body type');
     this.typeName = typeName;
   }
+}
+
+function unsupportedBodyError(name: string): ApiError {
+  return new ApiError({
+    kind: 'serialize',
+    code: 'BODY_SERIALIZATION_ERROR',
+    message:
+      `Unsupported value in request body: ${name}. ` +
+      `Convert it to a plain object or an array before sending.`,
+  });
 }
 
 /**
@@ -100,75 +43,68 @@ export interface PreparedBody {
  * и рекомендованный Content-Type. Если приложение задало
  * Content-Type явно, транспорт его не перезаписывает.
  *
- * Для стримов (Web ReadableStream и Node.js stream.Readable)
- * Content-Type не выставляется: поток может содержать бинарные
- * данные, текст, JSON Lines. Приложение задаёт тип явно, если он
- * важен для сервера.
+ * Для стримов Content-Type не выставляется: поток может содержать
+ * бинарные данные, текст, JSON Lines. Приложение задаёт тип явно,
+ * если он важен для сервера.
  *
  * @throws ApiError с кодом BODY_SERIALIZATION_ERROR, если тело
- *   не удалось сериализовать в JSON: циклические ссылки, BigInt,
- *   Map, Set, WeakMap, WeakSet, RegExp, Error. Для последних
- *   JSON.stringify вернул бы {}, и сервер получил бы пустой объект
- *   вместо данных. Проверка рекурсивная: неподдерживаемый тип
- *   на любом уровне вложенности отклоняет запрос.
+ *   содержит Map, Set, WeakMap, WeakSet, RegExp или Error на верхнем
+ *   уровне, либо любое значение, не сериализуемое в JSON, на любом
+ *   уровне вложенности: Blob, File, FormData, ArrayBuffer, TypedArray,
+ *   ReadableStream, URLSearchParams. JSON.stringify превратил бы
+ *   их в {}, и сервер получил бы пустой объект вместо данных.
  */
 export function prepareBody(value: unknown): PreparedBody {
-  if (value === undefined || value === null) {
-    return { body: undefined, contentType: undefined };
+  const kind = classifyBody(value);
+
+  if (isUnsupportedKind(kind)) {
+    throw unsupportedBodyError(bodyKindName(kind));
   }
 
-  // Content-Type подставит браузер с правильной boundary.
-  if (isFormData(value)) {
-    return { body: value, contentType: undefined };
-  }
+  switch (kind) {
+    case 'undefined':
+      return { body: undefined, contentType: undefined };
 
-  if (isBlob(value)) {
-    return {
-      body: value,
-      contentType: value.type || 'application/octet-stream',
-    };
-  }
+    case 'form-data':
+      return { body: value as BodyInit, contentType: undefined };
 
-  if (isArrayBuffer(value)) {
-    return { body: value, contentType: 'application/octet-stream' };
-  }
+    case 'blob':
+    case 'file': {
+      const blob = value as Blob;
+      return {
+        body: value as BodyInit,
+        contentType: blob.type || 'application/octet-stream',
+      };
+    }
 
-  // TypedArray (Uint8Array, Int32Array и другие) и DataView.
-  // ArrayBuffer.isView cross-realm: это статический метод.
-  if (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(value)) {
-    return { body: value as BodyInit, contentType: 'application/octet-stream' };
-  }
+    case 'array-buffer':
+    case 'typed-array':
+      return { body: value as BodyInit, contentType: 'application/octet-stream' };
 
-  // Web ReadableStream. Транспорт добавит duplex: 'half' в
-  // RequestInit, без него fetch выбрасывает TypeError.
-  if (isReadableStreamBody(value)) {
-    return { body: value, contentType: undefined };
-  }
+    case 'readable-stream':
+    case 'node-readable':
+      return { body: value as BodyInit, contentType: undefined };
 
-  // Node.js stream.Readable. Fetch в Node 20+ принимает его как
-  // async iterable. Транспорт тоже установит duplex: 'half'.
-  if (isNodeReadableBody(value)) {
-    return { body: value as unknown as BodyInit, contentType: undefined };
-  }
+    case 'url-search-params':
+      return {
+        body: value as BodyInit,
+        contentType: 'application/x-www-form-urlencoded;charset=UTF-8',
+      };
 
-  if (isURLSearchParams(value)) {
-    return {
-      body: value,
-      contentType: 'application/x-www-form-urlencoded;charset=UTF-8',
-    };
-  }
+    case 'string':
+      return { body: value as string, contentType: undefined };
 
-  // Content-Type для строки не навязываем: приложение может
-  // отправить text/plain, text/csv, text/html и что угодно ещё.
-  if (typeof value === 'string') {
-    return { body: value, contentType: undefined };
+    case 'json':
+      return prepareJsonBody(value);
   }
+}
 
+function prepareJsonBody(value: unknown): PreparedBody {
   try {
     const json = JSON.stringify(value, (_key, val) => {
-      const unsupported = detectJSONUnfriendlyType(val);
-      if (unsupported !== null) {
-        throw new UnsupportedBodyTypeError(unsupported);
+      const kind = classifyBody(val);
+      if (!isSerializableKind(kind)) {
+        throw new UnsupportedBodyTypeError(bodyKindName(kind));
       }
       return val;
     });
@@ -183,13 +119,7 @@ export function prepareBody(value: unknown): PreparedBody {
     return { body: json, contentType: 'application/json' };
   } catch (e) {
     if (e instanceof UnsupportedBodyTypeError) {
-      throw new ApiError({
-        kind: 'serialize',
-        code: 'BODY_SERIALIZATION_ERROR',
-        message:
-          `Request body contains a ${e.typeName}. ` +
-          `Convert it to a plain object or an array before sending.`,
-      });
+      throw unsupportedBodyError(e.typeName);
     }
 
     throw new ApiError({

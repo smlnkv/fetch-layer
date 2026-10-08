@@ -1,7 +1,8 @@
 import { ApiError } from '../../core/errors';
+import { isSerializableBody } from '../../shared/classify-body';
 import { assertInteger } from '../../shared/validators';
 
-import { isSerializableBody, stableSerialize } from './serialize';
+import { stableSerialize } from './serialize';
 
 import type { IdempotencyContext, IdempotencyOutcome, IdempotencySource } from './types';
 import type { QueryParams } from '../../core/types';

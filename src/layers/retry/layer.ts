@@ -1,9 +1,9 @@
 import { type ApiError, toApiError } from '../../core/errors';
 import { runOnRetry } from '../../core/hooks';
+import { isStreamingBody } from '../../shared/classify-body';
 import { isMutatingMethod } from '../../shared/method';
 import { safeCall } from '../../shared/safe-call';
 import { sleep as defaultSleep, throwIfAborted } from '../../shared/signals';
-import { isStreamingBody } from '../../shared/streams';
 import {
   assertInteger,
   assertNonNegativeNumber,
@@ -126,7 +126,7 @@ function rootSegment(path: string): string {
  * сервер просит подождать дольше, чем приложение готово ждать.
  *
  * Для потоковых тел (Web ReadableStream, Node.js stream.Readable)
- * повторы отключены: поток одноразовый, повторный fetch бросит
+ * повторы отключены: поток одноразовый, повторный fetch выбросит
  * TypeError, который транспорт классифицирует как сетевую ошибку.
  *
  * @throws Error если параметры конфигурации некорректны.
@@ -141,6 +141,7 @@ export function withRetry(options: RetryOptions = {}): Layer {
     idempotencyHeaderName = 'Idempotency-Key',
     retryOnNetwork = true,
     retryOnTimeout = true,
+    shouldRetry,
     computeDelay,
     sleep = defaultSleep,
   } = options;
@@ -173,6 +174,9 @@ export function withRetry(options: RetryOptions = {}): Layer {
     const jitter = 1 - jitterRatio + Math.random() * jitterRatio * 2;
     return baseDelayMs * 2 ** (attempt - 1) * jitter;
   };
+
+  const retryPolicy = shouldRetry ?? defaultShouldRetry;
+  const delayPolicy = computeDelay ?? defaultCompute;
 
   return {
     name: 'withRetry',
@@ -254,11 +258,7 @@ export function withRetry(options: RetryOptions = {}): Layer {
             const failedAttempt = attempt + 1;
 
             const retryDecision =
-              safeCall(() =>
-                options.shouldRetry
-                  ? options.shouldRetry(err, failedAttempt)
-                  : defaultShouldRetry(err),
-              ) ?? defaultShouldRetry(err);
+              safeCall(() => retryPolicy(err, failedAttempt)) ?? defaultShouldRetry(err);
 
             if (!retryDecision) throw err;
 
@@ -270,9 +270,7 @@ export function withRetry(options: RetryOptions = {}): Layer {
               delay = clampDelay(err.retryAfterMs, MIN_RETRY_MS);
             } else {
               const computed =
-                safeCall(() =>
-                  computeDelay ? computeDelay(failedAttempt, err) : defaultCompute(failedAttempt),
-                ) ?? defaultCompute(failedAttempt);
+                safeCall(() => delayPolicy(failedAttempt, err)) ?? defaultCompute(failedAttempt);
 
               delay = Math.min(clampDelay(computed, MIN_RETRY_MS), maxDelayMs);
             }

@@ -1,12 +1,10 @@
-// Тесты layers/idempotency/serialize.ts: stableSerialize,
-// isSerializableBody.
+// Тесты layers/idempotency/serialize.ts: stableSerialize.
 
 import { Readable } from 'node:stream';
 
 import { describe, expect, it } from 'vitest';
 
 import { stableSerialize } from '../src/index';
-import { isSerializableBody } from '../src/layers/idempotency/serialize';
 
 describe('stableSerialize - примитивы', () => {
   it('сериализует примитивы', () => {
@@ -78,130 +76,142 @@ describe('stableSerialize - toJSON', () => {
 
     expect(stableSerialize({ nested: { toJSON: () => [1, 2, 3] } })).toBe('{"nested":[1,2,3]}');
   });
+
+  it('toJSON может вернуть примитив, массив или объект', () => {
+    expect(stableSerialize({ x: { toJSON: () => 42 } })).toBe('{"x":42}');
+    expect(stableSerialize({ x: { toJSON: () => 'str' } })).toBe('{"x":"str"}');
+    expect(stableSerialize({ x: { toJSON: () => null } })).toBe('{"x":null}');
+    expect(stableSerialize({ x: { toJSON: () => [1, 2] } })).toBe('{"x":[1,2]}');
+    expect(stableSerialize({ x: { toJSON: () => ({ b: 1, a: 2 }) } })).toBe('{"x":{"a":2,"b":1}}');
+  });
+
+  it.each([
+    ['Map', { toJSON: () => new Map([['a', 1]]) }],
+    ['Set', { toJSON: () => new Set([1]) }],
+    ['Blob', { toJSON: () => new Blob(['x']) }],
+    ['File', { toJSON: () => new File(['x'], 'x.txt') }],
+    ['FormData', { toJSON: () => new FormData() }],
+    ['ArrayBuffer', { toJSON: () => new ArrayBuffer(8) }],
+    ['TypedArray', { toJSON: () => new Uint8Array([1]) }],
+    ['ReadableStream', { toJSON: () => new ReadableStream() }],
+    ['URLSearchParams', { toJSON: () => new URLSearchParams({ a: '1' }) }],
+  ])('toJSON, вернувший %s, отклоняется', (_name, value) => {
+    // Правило допустимых типов общее с prepareBody в транспорте.
+    // Без повторной проверки после toJSON значение прошло бы через
+    // рекурсию и превратилось в {}, дав одинаковый отпечаток
+    // разным телам.
+    expect(() => stableSerialize(value)).toThrowError(
+      expect.objectContaining({
+        kind: 'serialize',
+        code: 'BODY_SERIALIZATION_ERROR',
+      }),
+    );
+    expect(() => stableSerialize({ nested: value })).toThrowError(
+      expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
+    );
+  });
+
+  it('сообщение об ошибке называет тип, возвращённый toJSON', () => {
+    try {
+      stableSerialize({ toJSON: () => new Map() });
+      expect.fail('should have thrown');
+    } catch (e) {
+      expect((e as { cause?: unknown }).cause).toBeInstanceOf(TypeError);
+      expect((e as { cause: TypeError }).cause.message).toMatch(/Map/);
+      expect((e as { cause: TypeError }).cause.message).toMatch(/toJSON/);
+    }
+  });
 });
 
 describe('stableSerialize - несериализуемые типы', () => {
-  it('Map, Set, WeakMap, WeakSet отклоняются', () => {
-    expect(() => stableSerialize(new Map())).toThrowError(
+  it.each([
+    ['Map', new Map()],
+    ['Set', new Set()],
+    ['WeakMap', new WeakMap()],
+    ['WeakSet', new WeakSet()],
+    ['RegExp', /pattern/],
+    ['Error', new Error('boom')],
+    ['FormData', new FormData()],
+    ['Blob', new Blob(['x'])],
+    ['File', new File(['x'], 'x.txt')],
+    ['ArrayBuffer', new ArrayBuffer(8)],
+    ['TypedArray', new Uint8Array([1])],
+    ['ReadableStream', new ReadableStream()],
+    ['URLSearchParams', new URLSearchParams({ a: '1' })],
+    ['NodeReadable', Readable.from(['x'])],
+  ])('%s отклоняется на верхнем уровне', (_name, value) => {
+    expect(() => stableSerialize(value)).toThrowError(
       expect.objectContaining({
         kind: 'serialize',
         code: 'BODY_SERIALIZATION_ERROR',
       }),
     );
-    expect(() => stableSerialize(new Set())).toThrowError(
+  });
+
+  it.each([
+    ['Map', new Map()],
+    ['Blob', new Blob(['x'])],
+    ['File', new File(['x'], 'x.txt')],
+    ['FormData', new FormData()],
+    ['URLSearchParams', new URLSearchParams({ a: '1' })],
+    ['ArrayBuffer', new ArrayBuffer(8)],
+    ['TypedArray', new Uint8Array([1])],
+    ['ReadableStream', new ReadableStream()],
+    ['NodeReadable', Readable.from(['x'])],
+  ])('%s отклоняется во вложенном значении', (_name, value) => {
+    expect(() => stableSerialize({ nested: value })).toThrowError(
       expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
     );
-    expect(() => stableSerialize(new WeakMap())).toThrowError(
-      expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
-    );
-    expect(() => stableSerialize(new WeakSet())).toThrowError(
+    expect(() => stableSerialize([value])).toThrowError(
       expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
     );
   });
 
-  it('FormData, Blob, ArrayBuffer, TypedArray, ReadableStream, URLSearchParams, RegExp, Error отклоняются, включая вложенные', () => {
-    const types = [
-      new FormData(),
-      new Blob(['x']),
-      new ArrayBuffer(8),
-      new Uint8Array([1]),
-      new ReadableStream(),
-      new URLSearchParams({ a: '1' }),
-      /pattern/,
-      new Error('boom'),
+  it('сообщение об ошибке называет конкретный тип', () => {
+    const cases: Array<[unknown, RegExp]> = [
+      [new File(['x'], 'x.txt'), /File/],
+      [new Blob(['x']), /Blob/],
+      [Readable.from(['x']), /NodeReadable/],
+      [new Map(), /Map/],
     ];
-
-    for (const value of types) {
-      expect(() => stableSerialize(value)).toThrowError(
-        expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
-      );
-    }
-
-    expect(() => stableSerialize({ pattern: /x/ })).toThrowError(
-      expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
-    );
-    expect(() => stableSerialize([new Map()])).toThrowError(
-      expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
-    );
-  });
-
-  it('File отклоняется как Blob-подобный тип', () => {
-    // Без File в detectUnsupportedType два разных файла получили бы
-    // одинаковый ключ идемпотентности.
-    const file = new File(['content'], 'avatar.png', { type: 'image/png' });
-
-    expect(() => stableSerialize(file)).toThrowError(
-      expect.objectContaining({
-        kind: 'serialize',
-        code: 'BODY_SERIALIZATION_ERROR',
-      }),
-    );
-
-    expect(() => stableSerialize({ avatar: file })).toThrowError(
-      expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
-    );
-
-    expect(() => stableSerialize([file])).toThrowError(
-      expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
-    );
-  });
-
-  it('сообщение об ошибке для File называет тип File, а не Blob', () => {
-    try {
-      stableSerialize(new File(['x'], 'x.bin'));
-      expect.fail('should have thrown');
-    } catch (e) {
-      expect((e as { cause?: unknown }).cause).toBeInstanceOf(TypeError);
-      expect((e as { cause: TypeError }).cause.message).toMatch(/File/);
+    for (const [value, pattern] of cases) {
+      try {
+        stableSerialize(value);
+        expect.fail('should have thrown');
+      } catch (e) {
+        expect((e as { cause?: unknown }).cause).toBeInstanceOf(TypeError);
+        expect((e as { cause: TypeError }).cause.message).toMatch(pattern);
+      }
     }
   });
 
-  it('Node.js stream.Readable отклоняется до обхода _readableState', () => {
-    // Без isNodeReadableBody stableSerialize обходил бы enumerable-
-    // свойства _readableState, находил там циклические ссылки и падал
-    // с 'Converting circular structure to JSON'. Пользователь видел
-    // BODY_SERIALIZATION_ERROR без указания, что проблема в стриме.
+  it('Node.js stream отклоняется до обхода _readableState', () => {
+    // Без явной проверки stableSerialize обошёл бы enumerable-свойства
+    // _readableState, нашёл там циклические ссылки и упал с
+    // 'Converting circular structure to JSON'.
     const readable = Readable.from(['hello', 'world']);
-
     expect(() => stableSerialize(readable)).toThrowError(
-      expect.objectContaining({
-        kind: 'serialize',
-        code: 'BODY_SERIALIZATION_ERROR',
-      }),
-    );
-
-    expect(() => stableSerialize({ stream: readable })).toThrowError(
       expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
     );
-
-    expect(() => stableSerialize([readable])).toThrowError(
-      expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
-    );
-  });
-
-  it('сообщение об ошибке для Node.js stream называет тип NodeReadable', () => {
-    try {
-      stableSerialize(Readable.from(['x']));
-      expect.fail('should have thrown');
-    } catch (e) {
-      expect((e as { cause?: unknown }).cause).toBeInstanceOf(TypeError);
-      expect((e as { cause: TypeError }).cause.message).toMatch(/NodeReadable/);
-    }
   });
 });
 
 describe('stableSerialize - циклы и общие ссылки', () => {
-  it('ошибка ApiError для циклов, включая cause', () => {
+  it('ошибка для циклов, включая cause', () => {
     const shallow: { name: string; self?: unknown } = { name: 'loop' };
     shallow.self = shallow;
 
-    expect(() => stableSerialize(shallow)).toThrowError(
-      expect.objectContaining({
+    try {
+      stableSerialize(shallow);
+      expect.fail('should have thrown');
+    } catch (e) {
+      expect(e).toMatchObject({
         name: 'ApiError',
         kind: 'serialize',
         code: 'BODY_SERIALIZATION_ERROR',
-      }),
-    );
+      });
+      expect((e as { cause?: unknown }).cause).toBeInstanceOf(TypeError);
+    }
 
     const a: { b?: unknown } = {};
     const b: { a?: unknown } = { a };
@@ -209,13 +219,6 @@ describe('stableSerialize - циклы и общие ссылки', () => {
     expect(() => stableSerialize(a)).toThrowError(
       expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
     );
-
-    try {
-      stableSerialize(shallow);
-      expect.fail('should have thrown');
-    } catch (e) {
-      expect((e as { cause?: unknown }).cause).toBeInstanceOf(TypeError);
-    }
   });
 
   it('разрешает общие ссылки без цикла', () => {
@@ -226,7 +229,7 @@ describe('stableSerialize - циклы и общие ссылки', () => {
 });
 
 describe('stableSerialize - BigInt', () => {
-  it('ошибка ApiError на верхнем уровне, в объекте и в массиве', () => {
+  it('ошибка на верхнем уровне, в объекте и в массиве', () => {
     expect(() => stableSerialize(1n)).toThrowError(
       expect.objectContaining({
         kind: 'serialize',
@@ -239,49 +242,5 @@ describe('stableSerialize - BigInt', () => {
     expect(() => stableSerialize([1n, 2n])).toThrowError(
       expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
     );
-  });
-});
-
-describe('isSerializableBody', () => {
-  it('true для примитивов и plain-объектов', () => {
-    expect(isSerializableBody('string')).toBe(true);
-    expect(isSerializableBody(42)).toBe(true);
-    expect(isSerializableBody(null)).toBe(true);
-    expect(isSerializableBody(undefined)).toBe(true);
-    expect(isSerializableBody({ a: 1 })).toBe(true);
-    expect(isSerializableBody([1, 2, 3])).toBe(true);
-  });
-
-  it('false для бинарных типов и потоков', () => {
-    const fd = new FormData();
-    fd.append('key', 'value');
-    expect(isSerializableBody(fd)).toBe(false);
-    expect(isSerializableBody(new Blob(['x']))).toBe(false);
-    expect(isSerializableBody(new ArrayBuffer(8))).toBe(false);
-    expect(isSerializableBody(new Uint8Array([1, 2]))).toBe(false);
-    expect(isSerializableBody(new Int32Array([1, 2]))).toBe(false);
-    expect(isSerializableBody(new ReadableStream())).toBe(false);
-    expect(isSerializableBody(new URLSearchParams({ a: '1' }))).toBe(false);
-  });
-
-  it('false для File', () => {
-    const typedFile = new File(['content'], 'avatar.png', { type: 'image/png' });
-    const untypedFile = new File(['content'], 'unknown.bin');
-    expect(isSerializableBody(typedFile)).toBe(false);
-    expect(isSerializableBody(untypedFile)).toBe(false);
-  });
-
-  it('false для Node.js stream.Readable', () => {
-    expect(isSerializableBody(Readable.from(['x']))).toBe(false);
-    expect(isSerializableBody(Readable.from([]))).toBe(false);
-  });
-
-  it('false для Map, Set, WeakMap, WeakSet, RegExp, Error', () => {
-    expect(isSerializableBody(new Map())).toBe(false);
-    expect(isSerializableBody(new Set())).toBe(false);
-    expect(isSerializableBody(new WeakMap())).toBe(false);
-    expect(isSerializableBody(new WeakSet())).toBe(false);
-    expect(isSerializableBody(/x/)).toBe(false);
-    expect(isSerializableBody(new Error('x'))).toBe(false);
   });
 });

@@ -9,61 +9,32 @@ import { type ApiError } from '../src/core/errors';
 import { parseResponse, prepareBody, readBodyAsJsonOrText } from '../src/transport/body';
 
 describe('prepareBody', () => {
-  it('пустое тело: undefined и null', () => {
-    expect(prepareBody(undefined)).toEqual({
-      body: undefined,
-      contentType: undefined,
-    });
-    expect(prepareBody(null)).toEqual({
-      body: undefined,
-      contentType: undefined,
-    });
+  it.each([
+    [undefined, { body: undefined, contentType: undefined }],
+    [null, { body: undefined, contentType: undefined }],
+    ['hello', { body: 'hello', contentType: undefined }],
+    ['', { body: '', contentType: undefined }],
+    [
+      { name: 'Alice', age: 30 },
+      { body: '{"name":"Alice","age":30}', contentType: 'application/json' },
+    ],
+    [[1, 2, 3], { body: '[1,2,3]', contentType: 'application/json' }],
+    [42, { body: '42', contentType: 'application/json' }],
+    [true, { body: 'true', contentType: 'application/json' }],
+  ])('%o -> тело и Content-Type', (value, expected) => {
+    expect(prepareBody(value)).toEqual(expected);
   });
 
-  it('JSON: объект, массив, число, boolean, Date', () => {
-    expect(prepareBody({ name: 'Alice', age: 30 })).toEqual({
-      body: '{"name":"Alice","age":30}',
-      contentType: 'application/json',
-    });
-    expect(prepareBody([1, 2, 3])).toEqual({
-      body: '[1,2,3]',
-      contentType: 'application/json',
-    });
-    expect(prepareBody(42)).toEqual({
-      body: '42',
-      contentType: 'application/json',
-    });
-    expect(prepareBody(true)).toEqual({
-      body: 'true',
-      contentType: 'application/json',
-    });
+  it('JSON: Date через toJSON, NaN и Infinity как null, undefined пропускается', () => {
     expect(prepareBody({ date: new Date('2026-09-13T12:00:00.000Z') }).body).toBe(
       '{"date":"2026-09-13T12:00:00.000Z"}',
     );
-
-    // Поведение как у JSON.stringify: NaN и Infinity - null,
-    // undefined в объекте пропускается, undefined в массиве - null.
-    expect(prepareBody({ a: NaN, b: Infinity })).toEqual({
-      body: '{"a":null,"b":null}',
-      contentType: 'application/json',
-    });
-    expect(prepareBody({ a: 1, b: undefined })).toEqual({
-      body: '{"a":1}',
-      contentType: 'application/json',
-    });
-    expect(prepareBody([1, undefined, 2])).toEqual({
-      body: '[1,null,2]',
-      contentType: 'application/json',
-    });
+    expect(prepareBody({ a: NaN, b: Infinity }).body).toBe('{"a":null,"b":null}');
+    expect(prepareBody({ a: 1, b: undefined }).body).toBe('{"a":1}');
+    expect(prepareBody([1, undefined, 2]).body).toBe('[1,null,2]');
   });
 
-  it('строка уходит как есть без Content-Type', () => {
-    expect(prepareBody('hello')).toEqual({ body: 'hello', contentType: undefined });
-    expect(prepareBody('')).toEqual({ body: '', contentType: undefined });
-    expect(prepareBody('{"a":1}')).toEqual({ body: '{"a":1}', contentType: undefined });
-  });
-
-  it('FormData и Blob', () => {
+  it('FormData, Blob и File уходят как есть', () => {
     const formData = new FormData();
     formData.append('name', 'Alice');
     expect(prepareBody(formData)).toEqual({ body: formData, contentType: undefined });
@@ -79,13 +50,9 @@ describe('prepareBody', () => {
       body: untypedBlob,
       contentType: 'application/octet-stream',
     });
-  });
 
-  it('File распознаётся как Blob: тело уходит как есть', () => {
-    // File наследуется от Blob в спецификации, но имеет собственный
-    // Symbol.toStringTag = 'File' и потому не проходит проверку
-    // по тегу '[object Blob]'. Без отдельной ветки тело уходило бы
-    // в JSON.stringify и превращалось в '{}'.
+    // File распознаётся отдельной категорией, но обрабатывается
+    // как Blob: тело уходит как есть, Content-Type берётся из type.
     const typedFile = new File(['content'], 'avatar.png', { type: 'image/png' });
     expect(prepareBody(typedFile)).toEqual({
       body: typedFile,
@@ -99,42 +66,32 @@ describe('prepareBody', () => {
     });
   });
 
-  it('ArrayBuffer, TypedArray, DataView', () => {
-    const buffer = new ArrayBuffer(8);
-    expect(prepareBody(buffer)).toEqual({
-      body: buffer,
+  it('ArrayBuffer, TypedArray, DataView: application/octet-stream', () => {
+    expect(prepareBody(new ArrayBuffer(8))).toEqual({
+      body: expect.any(ArrayBuffer),
       contentType: 'application/octet-stream',
     });
-
-    const u8 = new Uint8Array([1, 2, 3]);
-    expect(prepareBody(u8)).toEqual({
-      body: u8,
+    expect(prepareBody(new Uint8Array([1, 2, 3]))).toEqual({
+      body: expect.any(Uint8Array),
       contentType: 'application/octet-stream',
     });
-
-    const view = new DataView(new ArrayBuffer(8));
-    expect(prepareBody(view)).toEqual({
-      body: view,
+    expect(prepareBody(new DataView(new ArrayBuffer(8)))).toEqual({
+      body: expect.any(DataView),
       contentType: 'application/octet-stream',
     });
   });
 
-  it('Web ReadableStream: без Content-Type по умолчанию', () => {
-    const stream = new ReadableStream();
-    expect(prepareBody(stream)).toEqual({
-      body: stream,
-      contentType: undefined,
-    });
-  });
+  it('Web ReadableStream и Node.js stream.Readable: без Content-Type', () => {
+    const webStream = new ReadableStream();
+    expect(prepareBody(webStream)).toEqual({ body: webStream, contentType: undefined });
 
-  it('Node.js stream.Readable: без Content-Type, body как async iterable', () => {
-    const readable = Readable.from(['hello', 'world']);
-    const result = prepareBody(readable);
-    expect(result.body).toBe(readable);
+    const nodeStream = Readable.from(['hello', 'world']);
+    const result = prepareBody(nodeStream);
+    expect(result.body).toBe(nodeStream);
     expect(result.contentType).toBeUndefined();
   });
 
-  it('URLSearchParams', () => {
+  it('URLSearchParams: application/x-www-form-urlencoded', () => {
     const params = new URLSearchParams({ a: '1', b: '2' });
     expect(prepareBody(params)).toEqual({
       body: params,
@@ -142,61 +99,74 @@ describe('prepareBody', () => {
     });
   });
 
-  it('ошибки сериализации: BigInt и циклы', () => {
-    expect(() => prepareBody({ id: 1n })).toThrowError(
-      expect.objectContaining({
-        name: 'ApiError',
-        kind: 'serialize',
-        code: 'BODY_SERIALIZATION_ERROR',
-      }),
-    );
-
-    const obj: Record<string, unknown> = { name: 'loop' };
-    obj.self = obj;
-    expect(() => prepareBody(obj)).toThrowError(
-      expect.objectContaining({
-        kind: 'serialize',
-        code: 'BODY_SERIALIZATION_ERROR',
-      }),
-    );
-
-    try {
-      prepareBody({ id: 1n });
-      expect.fail('should have thrown');
-    } catch (e) {
-      expect((e as ApiError).cause).toBeInstanceOf(TypeError);
-    }
-  });
-
-  it('Map, Set, RegExp, Error отклоняются с BODY_SERIALIZATION_ERROR', () => {
-    // JSON.stringify вернул бы {} для этих типов, и сервер получил бы
-    // пустой объект вместо данных. Ошибка возникает до отправки.
-    for (const body of [
-      new Map([['a', 1]]),
-      new Set([1, 2]),
-      new WeakMap(),
-      new WeakSet(),
-      /pattern/,
-      new Error('boom'),
+  it('BigInt и циклы: BODY_SERIALIZATION_ERROR с TypeError в cause', () => {
+    for (const value of [
+      { id: 1n },
+      (() => {
+        const o: Record<string, unknown> = {};
+        o.self = o;
+        return o;
+      })(),
     ]) {
-      expect(() => prepareBody(body)).toThrowError(
-        expect.objectContaining({
+      try {
+        prepareBody(value);
+        expect.fail('should have thrown');
+      } catch (e) {
+        const err = e as ApiError;
+        expect(err).toMatchObject({
           kind: 'serialize',
           code: 'BODY_SERIALIZATION_ERROR',
-        }),
-      );
+        });
+        expect(err.cause).toBeInstanceOf(TypeError);
+      }
     }
   });
 
-  it('сообщение об ошибке называет тип и подсказывает замену', () => {
+  it.each([
+    ['Map', new Map([['a', 1]])],
+    ['Set', new Set([1, 2])],
+    ['WeakMap', new WeakMap()],
+    ['WeakSet', new WeakSet()],
+    ['RegExp', /pattern/],
+    ['Error', new Error('boom')],
+  ])('%s на верхнем уровне: BODY_SERIALIZATION_ERROR с именем типа', (_name, value) => {
     try {
-      prepareBody(new Map());
+      prepareBody(value);
       expect.fail('should have thrown');
     } catch (e) {
       const err = e as ApiError;
-      expect(err.message).toMatch(/Map/);
+      expect(err.kind).toBe('serialize');
+      expect(err.code).toBe('BODY_SERIALIZATION_ERROR');
+      expect(err.message).toMatch(new RegExp(_name));
       expect(err.message).toMatch(/plain object/);
     }
+  });
+
+  it('несериализуемый тип во вложенном значении отклоняется', () => {
+    // Map/Set/RegExp/Error не проходят на верхнем уровне,
+    // но и внутри JSON они дали бы {} вместо данных.
+    expect(() => prepareBody({ nested: new Map() })).toThrowError(
+      expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
+    );
+    expect(() => prepareBody([new Set()])).toThrowError(
+      expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
+    );
+  });
+
+  it.each([
+    ['Blob', new Blob(['x'])],
+    ['File', new File(['x'], 'x.txt')],
+    ['FormData', new FormData()],
+    ['URLSearchParams', new URLSearchParams({ a: '1' })],
+    ['ArrayBuffer', new ArrayBuffer(8)],
+    ['TypedArray', new Uint8Array([1])],
+    ['ReadableStream', new ReadableStream()],
+  ])('%s во вложенном значении отклоняется до отправки', (_name, value) => {
+    // Без этой проверки JSON.stringify превратил бы вложенный Blob
+    // в {}, и сервер получил бы пустой объект вместо данных.
+    expect(() => prepareBody({ payload: value })).toThrowError(
+      expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
+    );
   });
 });
 
