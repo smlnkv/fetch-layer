@@ -5,11 +5,12 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { createMockFetch, createTestClient, createTestSessionProvider } from './helpers';
 
-import type { ApiError, RequestConfig, ResponseMeta } from '../src/index';
+import type { ResolvedRequestConfig } from '../src/core/types';
+import type { ApiError, ResponseMeta } from '../src/index';
 
 describe('onRequest', () => {
   it('вызывается один раз с config; undefined - использовать исходный', async () => {
-    const onRequest1 = vi.fn((config: RequestConfig) => config);
+    const onRequest1 = vi.fn((config: ResolvedRequestConfig) => config);
     const mock1 = createMockFetch(() => ({ body: {} }));
     const client1 = createTestClient({
       fetch: mock1.fetch,
@@ -74,7 +75,7 @@ describe('onBeforeSend', () => {
     await client.get('/users');
 
     expect(onBeforeSend).toHaveBeenCalledTimes(1);
-    const [config] = onBeforeSend.mock.calls[0] as [RequestConfig];
+    const [config] = onBeforeSend.mock.calls[0] as [ResolvedRequestConfig];
     expect(config.path).toBe('/users');
     expect(config.method).toBe('GET');
   });
@@ -187,7 +188,7 @@ describe('onResponse', () => {
     });
     await client1.get('/users');
     expect(onResponse1).toHaveBeenCalledTimes(1);
-    const [, meta] = onResponse1.mock.calls[0] as [RequestConfig, ResponseMeta];
+    const [, meta] = onResponse1.mock.calls[0] as [ResolvedRequestConfig, ResponseMeta];
     expect(meta.status).toBe(201);
 
     const onResponse2 = vi.fn();
@@ -262,7 +263,7 @@ describe('onError', () => {
     const client1 = createTestClient({ fetch: mock1.fetch, hooks: { onError: onError1 } });
     await expect(client1.get('/users')).rejects.toBeDefined();
     expect(onError1).toHaveBeenCalledTimes(1);
-    const [, netErr] = onError1.mock.calls[0] as [RequestConfig, ApiError];
+    const [, netErr] = onError1.mock.calls[0] as [ResolvedRequestConfig, ApiError];
     expect(netErr.kind).toBe('network');
 
     const onError2 = vi.fn();
@@ -272,7 +273,7 @@ describe('onError', () => {
     controller.abort();
     await expect(client2.get('/users', { signal: controller.signal })).rejects.toBeDefined();
     expect(onError2).toHaveBeenCalledTimes(1);
-    const [, abortErr] = onError2.mock.calls[0] as [RequestConfig, ApiError];
+    const [, abortErr] = onError2.mock.calls[0] as [ResolvedRequestConfig, ApiError];
     expect(abortErr.isCancelled).toBe(true);
   });
 

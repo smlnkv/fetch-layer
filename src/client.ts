@@ -3,6 +3,7 @@ import { runOnError, runOnRequest } from './core/hooks';
 import { applyLayers, runAttach, validateLayerOrder } from './core/layer';
 import { safeCall } from './shared/safe-call';
 import { assertNonEmptyString, assertPositiveNumber } from './shared/validators';
+import { mergeHeaders } from './transport/headers';
 import { createBaseRequest, type TransportOptions } from './transport/transport';
 
 import type { Layer, LayerContext, Logger } from './core/layer';
@@ -10,12 +11,20 @@ import type {
   Client,
   HttpMethod,
   RequestConfig,
-  RequestFn,
   RequestOptions,
+  ResolvedRequestConfig,
   ResponseWithMeta,
 } from './core/types';
 
 const MIN_TIMEOUT_MS = 100;
+
+/**
+ * Публичная функция запроса: принимает RequestConfig с любым
+ * HeadersInit. Внутренний RequestFn работает с ResolvedRequestConfig,
+ * где заголовки уже Record. Эти два типа несовместимы напрямую,
+ * поэтому публичная функция вводится локально, без экспорта.
+ */
+type PublicRequestFn = <T = unknown>(config: RequestConfig) => Promise<T>;
 
 /**
  * Логгер по умолчанию: пустой объект. Библиотека не пишет в console
@@ -47,6 +56,18 @@ export interface ClientOptions extends TransportOptions {
 }
 
 /**
+ * Приводит публичный RequestConfig к внутреннему виду: заголовки
+ * нормализуются в Record. undefined остаётся undefined, чтобы
+ * хуки не видели пустой объект вместо отсутствия заголовков.
+ */
+function resolveConfig(config: RequestConfig): ResolvedRequestConfig {
+  return {
+    ...config,
+    headers: config.headers ? mergeHeaders(config.headers) : undefined,
+  };
+}
+
+/**
  * Собирает pipeline из базового транспорта и слоёв, валидирует
  * порядок. Поверх pipeline - обёртка с onRequest (один раз
  * на операцию) и onError (один раз на финальную ошибку).
@@ -71,11 +92,11 @@ export function createClient(options: ClientOptions): Client {
   const baseRequest = createBaseRequest(options);
   const { pipeline, states } = applyLayers(baseRequest, layers, context);
 
-  const wrapped: RequestFn = async <T>(config: RequestConfig): Promise<T> => {
-    const hooked = runOnRequest(options.hooks, config);
+  const wrapped: PublicRequestFn = async <T>(config: RequestConfig): Promise<T> => {
+    const resolved = resolveConfig(config);
+    const hooked = runOnRequest(options.hooks, resolved);
 
-    // onRequest может вернуть новый конфиг: проверяем его поля,
-    // а не исходные.
+    // Проверяем поля после onRequest, а не исходные.
     assertNonEmptyString(hooked.path, 'client: path');
 
     if (hooked.timeoutMs !== undefined) {
@@ -88,7 +109,7 @@ export function createClient(options: ClientOptions): Client {
     // Нормализуем метод до верхнего регистра: слои (withIdempotency,
     // withRetry) сравнивают его со строками 'POST', 'PUT' и другими.
     // Fetch нормализует сам, но слои получают конфиг до fetch.
-    const finalConfig: RequestConfig = {
+    const finalConfig: ResolvedRequestConfig = {
       ...hooked,
       method: (hooked.method ?? 'GET').toUpperCase() as HttpMethod,
     };
@@ -186,17 +207,17 @@ function isLayerLike(value: unknown): value is Layer {
  * Сокращённые методы (get, post и другие) вызывают функцию запроса
  * с добавленными path, method и body.
  */
-function makeBodyless(request: RequestFn, method: HttpMethod) {
+function makeBodyless(request: PublicRequestFn, method: HttpMethod) {
   return <T>(path: string, options?: RequestOptions): Promise<T> =>
     request<T>({ ...options, path, method });
 }
 
-function makeBody(request: RequestFn, method: HttpMethod) {
+function makeBody(request: PublicRequestFn, method: HttpMethod) {
   return <T>(path: string, body?: unknown, options?: RequestOptions): Promise<T> =>
     request<T>({ ...options, path, method, body });
 }
 
-function makeMetaOnly(request: RequestFn, method: 'HEAD' | 'OPTIONS') {
+function makeMetaOnly(request: PublicRequestFn, method: 'HEAD' | 'OPTIONS') {
   return (path: string, options?: RequestOptions): Promise<ResponseWithMeta<undefined>> =>
     request<ResponseWithMeta<undefined>>({
       ...options,
@@ -206,7 +227,7 @@ function makeMetaOnly(request: RequestFn, method: 'HEAD' | 'OPTIONS') {
     });
 }
 
-function makeClient(request: RequestFn): Client {
+function makeClient(request: PublicRequestFn): Client {
   return {
     request: <T>(config: RequestConfig) => request<T>(config),
     requestWithMeta: <T>(config: RequestConfig) =>

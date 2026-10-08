@@ -9,7 +9,7 @@ import { attachReset } from './reset-registry';
 
 import type { SessionExpiredReason, SessionProvider } from './types';
 import type { Layer, LayerContext, LayerWrapResult } from '../../core/layer';
-import type { RequestConfig, RequestFn } from '../../core/types';
+import type { RequestFn, ResolvedRequestConfig } from '../../core/types';
 
 const DEFAULT_CIRCUIT_BREAKER_MS = 5000;
 const DEFAULT_REFRESH_TIMEOUT_MS = 30_000;
@@ -114,7 +114,9 @@ export function withAuth(options: AuthOptions): Layer {
         refreshTimeoutMs,
       );
 
-      const fn: RequestFn = async function authRequest<T>(config: RequestConfig): Promise<T> {
+      const fn: RequestFn = async function authRequest<T>(
+        config: ResolvedRequestConfig,
+      ): Promise<T> {
         if (config.skipAuth) {
           return next<T>(config);
         }
@@ -122,7 +124,7 @@ export function withAuth(options: AuthOptions): Layer {
         throwIfAborted(config.signal);
 
         const authHeaders = await safeGetAuthHeaders(provider);
-        const withAuthConfig: RequestConfig = {
+        const withAuthConfig: ResolvedRequestConfig = {
           ...config,
           headers: mergeHeaders(config.headers, authHeaders),
         };

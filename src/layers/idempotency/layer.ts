@@ -4,7 +4,7 @@ import { getHeader, mergeHeaders, setHeader } from '../../transport/headers';
 
 import type { IdempotencyContext, IdempotencyOutcome, IdempotencySource } from './types';
 import type { Layer, LayerWrapResult } from '../../core/layer';
-import type { RequestConfig, RequestFn } from '../../core/types';
+import type { RequestFn, ResolvedRequestConfig } from '../../core/types';
 
 export interface IdempotencyOptions {
   /**
@@ -41,7 +41,7 @@ export function withIdempotency(
 
     wrap(next: RequestFn): LayerWrapResult {
       const fn: RequestFn = async function idempotencyRequest<T>(
-        config: RequestConfig,
+        config: ResolvedRequestConfig,
       ): Promise<T> {
         const method = config.method ?? 'GET';
 
@@ -77,7 +77,7 @@ export function withIdempotency(
         const enrichedHeaders = mergeHeaders(config.headers);
         setHeader(enrichedHeaders, headerName, key);
 
-        const enriched: RequestConfig = {
+        const enriched: ResolvedRequestConfig = {
           ...config,
           headers: enrichedHeaders,
         };

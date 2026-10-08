@@ -13,7 +13,7 @@ import {
 import { getHeader } from '../../transport/headers';
 
 import type { Layer, LayerContext, LayerWrapResult } from '../../core/layer';
-import type { RequestConfig, RequestFn } from '../../core/types';
+import type { RequestFn, ResolvedRequestConfig } from '../../core/types';
 
 export interface RetryOptions {
   /**
@@ -197,7 +197,7 @@ export function withRetry(options: RetryOptions = {}): Layer {
       let warnedStreamNoRetry = false;
 
       const fn: RequestFn = async function retryRequest<T>(
-        initialConfig: RequestConfig,
+        initialConfig: ResolvedRequestConfig,
       ): Promise<T> {
         if (initialConfig.skipRetry) {
           return next<T>(initialConfig);

@@ -1,4 +1,4 @@
-import type { RequestConfig } from './types';
+import type { ResolvedRequestConfig } from './types';
 
 /**
  * Все HTTP-ошибки приводятся к одному классу ApiError, чтобы
@@ -118,7 +118,7 @@ export class ApiError extends Error {
    * X-API-Key. Не передавайте config целиком в системы логирования
    * и трейсинга без фильтрации.
    */
-  config?: RequestConfig;
+  config?: ResolvedRequestConfig;
 
   constructor(params: {
     kind: ApiErrorKind;

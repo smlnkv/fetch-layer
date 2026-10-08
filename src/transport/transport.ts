@@ -14,8 +14,8 @@ import type {
   Hooks,
   QueryArrayFormat,
   QueryObjectFormat,
-  RequestConfig,
   RequestFn,
+  ResolvedRequestConfig,
   ResponseMeta,
   ResponseType,
 } from '../core/types';
@@ -62,7 +62,8 @@ export interface TransportOptions {
 
 /**
  * Создаёт базовую функцию запроса: fetch, разбор ответа,
- * нормализация ошибок.
+ * нормализация ошибок. Принимает ResolvedRequestConfig: заголовки
+ * уже нормализованы в Record.
  */
 export function createBaseRequest(options: TransportOptions): RequestFn {
   const {
@@ -80,7 +81,7 @@ export function createBaseRequest(options: TransportOptions): RequestFn {
     errorBodyFormat: options.errorBodyFormat,
   });
 
-  return async function baseRequest<T>(config: RequestConfig): Promise<T> {
+  return async function baseRequest<T>(config: ResolvedRequestConfig): Promise<T> {
     throwIfAborted(config.signal);
 
     const method = config.method ?? 'GET';
@@ -117,7 +118,7 @@ export function createBaseRequest(options: TransportOptions): RequestFn {
     // Финальные заголовки, с Accept и Content-Type. Тот же
     // объект видят onBeforeSend и onResponse, он же прикрепляется
     // к ApiError, возникшей внутри try.
-    const finalConfig: RequestConfig = { ...config, headers };
+    const finalConfig: ResolvedRequestConfig = { ...config, headers };
 
     const effectiveTimeoutMs = config.timeoutMs ?? defaultTimeoutMs;
     const timeout = setAbortTimeout(effectiveTimeoutMs);

@@ -104,8 +104,12 @@ export interface RequestConfig {
    */
   body?: unknown;
 
-  /** Заголовки запроса. Имена регистронезависимы. */
-  headers?: Record<string, string>;
+  /**
+   * Заголовки запроса. Принимает любой HeadersInit: Record, Headers
+   * или массив пар. Имена регистронезависимы. Перед вызовом хуков
+   * и слоёв нормализуется в Record<string, string>.
+   */
+  headers?: HeadersInit;
 
   query?: QueryParams;
 
@@ -180,6 +184,19 @@ export interface RequestConfig {
 }
 
 /**
+ * Внутренний конфиг: заголовки уже нормализованы в Record. Этот тип
+ * получают хуки, слои и транспорт после того, как client.ts вызвал
+ * mergeHeaders на публичном RequestConfig.
+ *
+ * Пользователь этот тип не конструирует и не видит в публичном API.
+ * Он нужен только чтобы типобезопасно работать с заголовками внутри
+ * библиотеки: spread, индексация, установка через setHeader.
+ */
+export interface ResolvedRequestConfig extends Omit<RequestConfig, 'headers'> {
+  headers?: Record<string, string>;
+}
+
+/**
  * RequestConfig без обязательных path, method и body. Используется
  * в методах вида client.get, где path и method задаются самим
  * методом, а body передаётся отдельным аргументом.
@@ -195,6 +212,11 @@ export type RequestOptions = Omit<
  * Все хуки синхронные и вызываются через safeCall: исключение
  * из колбэка не прерывает запрос. Отменить запрос хуком нельзя:
  * для этого есть AbortSignal.
+ *
+ * Хуки получают и возвращают ResolvedRequestConfig: заголовки уже
+ * нормализованы в Record<string, string>. Это позволяет использовать
+ * spread и обычную индексацию: { ...config.headers, 'X-Trace': 'abc' }.
+ * Публичный HeadersInit нормализуется в client.ts до вызова хуков.
  *
  * Конфиг, который получают onBeforeSend, onResponse и onError,
  * содержит финальные заголовки, включая Accept, Content-Type
@@ -214,7 +236,7 @@ export interface Hooks {
    * Может вернуть новый конфиг или undefined, чтобы оставить
    * исходный.
    */
-  onRequest?: (config: RequestConfig) => RequestConfig | void;
+  onRequest?: (config: ResolvedRequestConfig) => ResolvedRequestConfig | void;
 
   /**
    * Перед каждой отправкой в fetch, после всех слоёв. Получает
@@ -224,7 +246,7 @@ export interface Hooks {
    * Возвращаемое значение игнорируется: конфиг на этом этапе уже
    * сформирован слоями. Для логирования и трейсинга.
    */
-  onBeforeSend?: (config: RequestConfig) => void;
+  onBeforeSend?: (config: ResolvedRequestConfig) => void;
 
   /**
    * После успешного ответа: 2xx или 304. Ошибки сюда не попадают.
@@ -236,7 +258,7 @@ export interface Hooks {
    * Тело может отсутствовать (204, 304, HEAD, OPTIONS): проверяйте
    * meta.status, если нужно.
    */
-  onResponse?: (config: RequestConfig, meta: ResponseMeta) => void;
+  onResponse?: (config: ResolvedRequestConfig, meta: ResponseMeta) => void;
 
   /**
    * После финальной ошибки, один раз: после всех повторов
@@ -249,7 +271,7 @@ export interface Hooks {
    * в error.config. Для ошибок до транспорта (сериализация тела,
    * валидация) config не содержит финальных заголовков.
    */
-  onError?: (config: RequestConfig, error: ApiError) => void;
+  onError?: (config: ResolvedRequestConfig, error: ApiError) => void;
 
   /**
    * Перед каждой попыткой повтора. Может вернуть новый конфиг или
@@ -258,7 +280,11 @@ export interface Hooks {
    *
    * @param attempt - номер попытки с 1. Первый повтор: attempt === 1.
    */
-  onRetry?: (config: RequestConfig, attempt: number, error: ApiError) => RequestConfig | void;
+  onRetry?: (
+    config: ResolvedRequestConfig,
+    attempt: number,
+    error: ApiError,
+  ) => ResolvedRequestConfig | void;
 }
 
 /**
@@ -272,7 +298,7 @@ export interface Hooks {
  *
  * @internal
  */
-export type RequestFn = <T = unknown>(config: RequestConfig) => Promise<T>;
+export type RequestFn = <T = unknown>(config: ResolvedRequestConfig) => Promise<T>;
 
 /**
  * HTTP-клиент. Единственная точка входа в API библиотеки.

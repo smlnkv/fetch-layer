@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { createMemoryStorage, toApiError, type RequestConfig } from '../src/index';
+import { createMemoryStorage, toApiError } from '../src/index';
 import { createSessionSource } from '../src/layers/idempotency/index';
 
 import { createMockFetch, createTestClient, createTestStorage } from './helpers';
+
+import type { ResolvedRequestConfig } from '../src/core/types';
 
 describe('integration - полный pipeline', () => {
   it('401 -> refresh -> успех с сохранением Idempotency-Key', async () => {
@@ -368,7 +370,7 @@ describe('integration - envelope + parseErrorBody', () => {
 
 describe('integration - хуки и слои', () => {
   it('onBeforeSend видит финальные заголовки и при retry', async () => {
-    const captured: RequestConfig[] = [];
+    const captured: ResolvedRequestConfig[] = [];
 
     let attempts = 0;
     const mock = createMockFetch(() => {
