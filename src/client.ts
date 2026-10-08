@@ -74,7 +74,8 @@ function resolveConfig(config: RequestConfig): ResolvedRequestConfig {
  *
  * @throws Error если конфигурация некорректна: пустой baseUrl,
  *   неположительный или слишком маленький timeoutMs, недоступный
- *   fetch, нарушение порядка слоёв, дубликаты имён, дубликаты stage.
+ *   fetch, layers не массив, нарушение порядка слоёв, дубликаты
+ *   имён, дубликаты stage.
  */
 export function createClient(options: ClientOptions): Client {
   validateOptions(options);
@@ -175,32 +176,9 @@ function validateOptions(options: ClientOptions): void {
     );
   }
 
-  if (options.layers !== undefined) {
-    if (!Array.isArray(options.layers)) {
-      throw new Error('createClient: layers must be an array');
-    }
-
-    for (let i = 0; i < options.layers.length; i++) {
-      const layer: unknown = options.layers[i];
-      if (!isLayerLike(layer)) {
-        throw new Error(
-          `createClient: layers[${i}] is not a valid Layer. ` +
-            `Expected an object with a string "name" and a "wrap" function.`,
-        );
-      }
-    }
+  if (options.layers !== undefined && !Array.isArray(options.layers)) {
+    throw new Error('createClient: layers must be an array');
   }
-}
-
-/**
- * Минимальная проверка формы слоя: name - строка, wrap - функция.
- * Полная типизация достигается через TypeScript, рантайм проверяет
- * только то, что слой не null и не мусор.
- */
-function isLayerLike(value: unknown): value is Layer {
-  if (typeof value !== 'object' || value === null) return false;
-  const candidate = value as { name?: unknown; wrap?: unknown };
-  return typeof candidate.name === 'string' && typeof candidate.wrap === 'function';
 }
 
 /**

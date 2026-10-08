@@ -389,6 +389,25 @@ describe('client - заголовки', () => {
     });
     expect(mock.calls[1]?.headers['content-type']).toBe('text/plain');
   });
+
+  it('принимает Headers и массив пар', async () => {
+    const mock = createMockFetch(() => ({ body: {} }));
+    const client = createTestClient({ fetch: mock.fetch });
+
+    await client.get('/users', {
+      headers: new Headers({ 'X-From-Headers': 'h' }),
+    });
+    expect(mock.calls[0]?.headers['x-from-headers']).toBe('h');
+
+    await client.get('/users', {
+      headers: [
+        ['X-From-Pairs', 'p'],
+        ['X-Second', 's'],
+      ],
+    });
+    expect(mock.calls[1]?.headers['x-from-pairs']).toBe('p');
+    expect(mock.calls[1]?.headers['x-second']).toBe('s');
+  });
 });
 
 describe('client - credentials', () => {
@@ -719,47 +738,12 @@ describe('createClient - валидация', () => {
     expect(() => createClient({ baseUrl: '/api', timeoutMs: 5000 })).not.toThrow();
   });
 
-  it('ошибка конфигурации при невалидных элементах layers', () => {
+  it('ошибка конфигурации, если layers не массив', () => {
     expect(() =>
       createClient({
         baseUrl: '/api',
-        layers: [null as unknown as never],
+        layers: 'not-array' as unknown as never,
       }),
-    ).toThrow(/layers\[0\] is not a valid Layer/);
-
-    expect(() =>
-      createClient({
-        baseUrl: '/api',
-        layers: [{} as unknown as never],
-      }),
-    ).toThrow(/layers\[0\] is not a valid Layer/);
-
-    expect(() =>
-      createClient({
-        baseUrl: '/api',
-        layers: [{ name: 'x' } as unknown as never],
-      }),
-    ).toThrow(/layers\[0\] is not a valid Layer/);
-
-    expect(() =>
-      createClient({
-        baseUrl: '/api',
-        layers: [{ name: 123, wrap: () => ({ fn: async () => undefined }) } as unknown as never],
-      }),
-    ).toThrow(/layers\[0\] is not a valid Layer/);
-  });
-
-  it('указывает индекс проблемного элемента layers', () => {
-    const validLayer = {
-      name: 'ok',
-      wrap: (next: unknown) => ({ fn: next }),
-    };
-
-    expect(() =>
-      createClient({
-        baseUrl: '/api',
-        layers: [validLayer as never, null as unknown as never],
-      }),
-    ).toThrow(/layers\[1\] is not a valid Layer/);
+    ).toThrow(/layers must be an array/);
   });
 });
