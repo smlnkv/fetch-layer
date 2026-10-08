@@ -1,4 +1,5 @@
 import { ApiError, classifyFetchError } from '../../core/errors';
+import { unrefTimer } from '../../shared/timers';
 
 import { CircuitBreaker } from './circuit-breaker';
 import { SingleFlight } from './single-flight';
@@ -127,9 +128,7 @@ export class RefreshManager {
         reject(reason);
       }, this.refreshTimeoutMs);
 
-      if (typeof timer === 'object' && typeof (timer as { unref?: unknown }).unref === 'function') {
-        (timer as { unref: () => void }).unref();
-      }
+      unrefTimer(timer);
     });
 
     timeoutPromise.catch(() => {});

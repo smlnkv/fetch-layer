@@ -1,4 +1,5 @@
 import { safeCall } from '../../shared/safe-call';
+import { unrefTimer } from '../../shared/timers';
 
 export interface CircuitBreakerCallbacks {
   onOpen?: () => void;
@@ -43,8 +44,7 @@ export class CircuitBreaker {
    * продлевает блокировку, но onOpen второй раз не вызывается.
    *
    * В Node таймер не удерживает event loop (unref), чтобы процесс
-   * мог завершиться. В браузере setTimeout возвращает число,
-   * у которого unref нет.
+   * мог завершиться.
    *
    * @throws Error если durationMs не положительное число. Нулевая
    *   или отрицательная длительность открыла бы предохранитель
@@ -66,12 +66,7 @@ export class CircuitBreaker {
       clearTimeout(this.timer);
     }
     this.timer = setTimeout(() => this.close(), durationMs);
-    if (
-      typeof this.timer === 'object' &&
-      typeof (this.timer as { unref?: unknown }).unref === 'function'
-    ) {
-      (this.timer as { unref: () => void }).unref();
-    }
+    unrefTimer(this.timer);
 
     if (!wasOpen) {
       safeCall(() => this.callbacks.onOpen?.());

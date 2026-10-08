@@ -1,3 +1,5 @@
+import { unrefTimer } from './timers';
+
 /**
  * Выбрасывает AbortError, если сигнал отменён.
  */
@@ -53,9 +55,7 @@ export function setAbortTimeout(ms: number): { signal: AbortSignal; clear: () =>
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new DOMException('Timeout', 'TimeoutError')), ms);
 
-  if (typeof timer === 'object' && typeof (timer as { unref?: unknown }).unref === 'function') {
-    (timer as { unref: () => void }).unref();
-  }
+  unrefTimer(timer);
 
   return {
     signal: controller.signal,
