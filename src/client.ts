@@ -18,30 +18,19 @@ import type {
 const MIN_TIMEOUT_MS = 100;
 
 /**
- * Логгер по умолчанию.
- *
- * debug и info отсутствуют - библиотека не должна писать в консоль
- * без запроса.
+ * Логгер по умолчанию: пустой объект. Библиотека не пишет в console
+ * без явного запроса. Передайте свой logger, чтобы получать
+ * предупреждения и ошибки через него.
  */
-const defaultLogger: Logger = {
-  warn(message, ...args) {
-    if (typeof console !== 'undefined' && typeof console.warn === 'function') {
-      console.warn(message, ...args);
-    }
-  },
-  error(message, ...args) {
-    if (typeof console !== 'undefined' && typeof console.error === 'function') {
-      console.error(message, ...args);
-    }
-  },
-};
+const defaultLogger: Logger = {};
 
 /** Настройки клиента: все поля TransportOptions плюс logger и layers. */
 export interface ClientOptions extends TransportOptions {
   /**
-   * Логгер для внутренних сообщений. По умолчанию warn и error
-   * делегируют в console, debug и info молчат. Пустой объект
-   * полностью отключает вывод.
+   * Логгер для внутренних сообщений. По умолчанию не задан:
+   * библиотека молчит. Передайте свой logger, чтобы получать
+   * предупреждения и ошибки через него. Пустой объект эквивалентен
+   * отсутствию логгера.
    */
   logger?: Logger;
 
@@ -64,7 +53,7 @@ export interface ClientOptions extends TransportOptions {
  *
  * @throws Error если конфигурация некорректна: пустой baseUrl,
  *   неположительный или слишком маленький timeoutMs, недоступный
- *   fetch, нарушение порядка слоёв, дубликаты слоёв.
+ *   fetch, нарушение порядка слоёв, дубликаты имён, дубликаты stage.
  */
 export function createClient(options: ClientOptions): Client {
   validateOptions(options);
@@ -72,7 +61,7 @@ export function createClient(options: ClientOptions): Client {
   const layers = options.layers ?? [];
   const logger = options.logger ?? defaultLogger;
 
-  validateLayerOrder(layers, logger);
+  validateLayerOrder(layers);
 
   const context: LayerContext = {
     hooks: options.hooks,

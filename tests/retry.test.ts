@@ -554,124 +554,119 @@ describe('retry - валидация конфигурации', () => {
 
 describe('retry - warnOnUnsafeRetry', () => {
   it('предупреждает о небезопасном повторе POST', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
+    const warn = vi.fn();
     const mock = createMockFetch(() => ({ status: 500, body: {} }));
     const client = createRetryClient({
       fetch: mock.fetch,
       maxAttempts: 2,
       sleep: noSleep,
       warnOnUnsafeRetry: true,
+      logger: { warn },
     });
 
     await expect(client.post('/orders', {})).rejects.toBeDefined();
 
-    expect(warn).toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0]?.[0]).toMatch(/POST.*\/orders/);
-    warn.mockRestore();
   });
 
   it('не предупреждает при отключённом warn, заданном ключе, безопасном методе, skipIdempotency или кастомном имени заголовка', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    try {
-      const mock1 = createMockFetch(() => ({ status: 500, body: {} }));
-      const client1 = createRetryClient({
-        fetch: mock1.fetch,
-        maxAttempts: 2,
-        sleep: noSleep,
-        warnOnUnsafeRetry: false,
-      });
-      await expect(client1.post('/orders', {})).rejects.toBeDefined();
+    const warn = vi.fn();
 
-      const mock2 = createMockFetch(() => ({ status: 500, body: {} }));
-      const client2 = createRetryClient({
-        fetch: mock2.fetch,
-        maxAttempts: 2,
-        sleep: noSleep,
-        warnOnUnsafeRetry: true,
-      });
-      await expect(
-        client2.post('/orders', {}, { headers: { 'Idempotency-Key': 'test-key' } }),
-      ).rejects.toBeDefined();
+    const mock1 = createMockFetch(() => ({ status: 500, body: {} }));
+    const client1 = createRetryClient({
+      fetch: mock1.fetch,
+      maxAttempts: 2,
+      sleep: noSleep,
+      warnOnUnsafeRetry: false,
+      logger: { warn },
+    });
+    await expect(client1.post('/orders', {})).rejects.toBeDefined();
 
-      const mock3 = createMockFetch(() => ({ status: 500, body: {} }));
-      const client3 = createRetryClient({
-        fetch: mock3.fetch,
-        maxAttempts: 2,
-        sleep: noSleep,
-        warnOnUnsafeRetry: true,
-      });
-      await expect(client3.get('/users')).rejects.toBeDefined();
+    const mock2 = createMockFetch(() => ({ status: 500, body: {} }));
+    const client2 = createRetryClient({
+      fetch: mock2.fetch,
+      maxAttempts: 2,
+      sleep: noSleep,
+      warnOnUnsafeRetry: true,
+      logger: { warn },
+    });
+    await expect(
+      client2.post('/orders', {}, { headers: { 'Idempotency-Key': 'test-key' } }),
+    ).rejects.toBeDefined();
 
-      const mock4 = createMockFetch(() => ({ status: 500, body: {} }));
-      const client4 = createRetryClient({
-        fetch: mock4.fetch,
-        maxAttempts: 2,
-        sleep: noSleep,
-        warnOnUnsafeRetry: true,
-      });
-      await expect(client4.post('/orders', {}, { skipIdempotency: true })).rejects.toBeDefined();
+    const mock3 = createMockFetch(() => ({ status: 500, body: {} }));
+    const client3 = createRetryClient({
+      fetch: mock3.fetch,
+      maxAttempts: 2,
+      sleep: noSleep,
+      warnOnUnsafeRetry: true,
+      logger: { warn },
+    });
+    await expect(client3.get('/users')).rejects.toBeDefined();
 
-      const mock5 = createMockFetch(() => ({ status: 500, body: {} }));
-      const client5 = createTestClient({
-        fetch: mock5.fetch,
-        retry: { maxAttempts: 2, sleep: noSleep, warnOnUnsafeRetry: true },
-        idempotency: {
-          source: { nextKey: () => 'auto-key' },
-          headerName: 'X-Idempotency-Key',
-        },
-      });
-      await expect(client5.post('/orders', {})).rejects.toBeDefined();
+    const mock4 = createMockFetch(() => ({ status: 500, body: {} }));
+    const client4 = createRetryClient({
+      fetch: mock4.fetch,
+      maxAttempts: 2,
+      sleep: noSleep,
+      warnOnUnsafeRetry: true,
+      logger: { warn },
+    });
+    await expect(client4.post('/orders', {}, { skipIdempotency: true })).rejects.toBeDefined();
 
-      expect(warn).not.toHaveBeenCalled();
-    } finally {
-      warn.mockRestore();
-    }
+    const mock5 = createMockFetch(() => ({ status: 500, body: {} }));
+    const client5 = createTestClient({
+      fetch: mock5.fetch,
+      retry: { maxAttempts: 2, sleep: noSleep, warnOnUnsafeRetry: true },
+      idempotency: {
+        source: { nextKey: () => 'auto-key' },
+        headerName: 'X-Idempotency-Key',
+      },
+      logger: { warn },
+    });
+    await expect(client5.post('/orders', {})).rejects.toBeDefined();
+
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it('предупреждает один раз на клиента', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    try {
-      const mock = createMockFetch(() => ({ status: 500, body: {} }));
-      const client = createRetryClient({
-        fetch: mock.fetch,
-        maxAttempts: 2,
-        sleep: noSleep,
-        warnOnUnsafeRetry: true,
-      });
+    const warn = vi.fn();
+    const mock = createMockFetch(() => ({ status: 500, body: {} }));
+    const client = createRetryClient({
+      fetch: mock.fetch,
+      maxAttempts: 2,
+      sleep: noSleep,
+      warnOnUnsafeRetry: true,
+      logger: { warn },
+    });
 
-      await expect(client.post('/orders', { a: 1 })).rejects.toBeDefined();
-      await expect(client.post('/orders', { a: 2 })).rejects.toBeDefined();
-      await expect(client.post('/orders', { a: 3 })).rejects.toBeDefined();
+    await expect(client.post('/orders', { a: 1 })).rejects.toBeDefined();
+    await expect(client.post('/orders', { a: 2 })).rejects.toBeDefined();
+    await expect(client.post('/orders', { a: 3 })).rejects.toBeDefined();
 
-      expect(warn).toHaveBeenCalledTimes(1);
-    } finally {
-      warn.mockRestore();
-    }
+    expect(warn).toHaveBeenCalledTimes(1);
   });
 
   it('разные ресурсы дают отдельные предупреждения, id внутри ресурса не дают', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    try {
-      const mock = createMockFetch(() => ({ status: 500, body: {} }));
-      const client = createRetryClient({
-        fetch: mock.fetch,
-        maxAttempts: 2,
-        sleep: noSleep,
-        warnOnUnsafeRetry: true,
-      });
+    const warn = vi.fn();
+    const mock = createMockFetch(() => ({ status: 500, body: {} }));
+    const client = createRetryClient({
+      fetch: mock.fetch,
+      maxAttempts: 2,
+      sleep: noSleep,
+      warnOnUnsafeRetry: true,
+      logger: { warn },
+    });
 
-      await expect(client.delete('/sessions/1')).rejects.toBeDefined();
-      await expect(client.delete('/sessions/2')).rejects.toBeDefined();
-      await expect(client.delete('/sessions/3')).rejects.toBeDefined();
-      expect(warn).toHaveBeenCalledTimes(1);
+    await expect(client.delete('/sessions/1')).rejects.toBeDefined();
+    await expect(client.delete('/sessions/2')).rejects.toBeDefined();
+    await expect(client.delete('/sessions/3')).rejects.toBeDefined();
+    expect(warn).toHaveBeenCalledTimes(1);
 
-      await expect(client.delete('/orders/1')).rejects.toBeDefined();
-      await expect(client.delete('/orders/2')).rejects.toBeDefined();
-      expect(warn).toHaveBeenCalledTimes(2);
-    } finally {
-      warn.mockRestore();
-    }
+    await expect(client.delete('/orders/1')).rejects.toBeDefined();
+    await expect(client.delete('/orders/2')).rejects.toBeDefined();
+    expect(warn).toHaveBeenCalledTimes(2);
   });
 });
 

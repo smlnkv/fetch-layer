@@ -105,7 +105,7 @@ describe('validateLayerOrder - дубликаты', () => {
     ).toThrow(/more than once/);
   });
 
-  it('ошибка для дубликата кастомного слоя', () => {
+  it('ошибка при дубликате кастомного слоя, с именем в сообщении', () => {
     const custom: Layer = {
       name: 'withTiming',
       wrap: (next) => ({ fn: next }),
@@ -119,10 +119,7 @@ describe('validateLayerOrder - дубликаты', () => {
     ).toThrow(/withTiming.*more than once/);
   });
 
-  it('предупреждает через logger при дубликате stage', () => {
-    const warn = vi.fn();
-    const logger = { warn };
-
+  it('ошибка при дубликате stage', () => {
     const a: Layer = {
       name: 'withA',
       stage: 2,
@@ -137,41 +134,9 @@ describe('validateLayerOrder - дубликаты', () => {
     expect(() =>
       createClient({
         baseUrl: '/api',
-        logger,
         layers: [a, b],
       }),
-    ).not.toThrow();
-
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn.mock.calls[0]?.[0]).toMatch(/withA.*withB.*stage 2/);
-  });
-
-  it('не предупреждает, когда stage разные или не заданы', () => {
-    const warn = vi.fn();
-    const logger = { warn };
-
-    const a: Layer = {
-      name: 'withA',
-      stage: 3,
-      wrap: (next) => ({ fn: next }),
-    };
-    const b: Layer = {
-      name: 'withB',
-      stage: 2,
-      wrap: (next) => ({ fn: next }),
-    };
-    const c: Layer = {
-      name: 'withC',
-      wrap: (next) => ({ fn: next }),
-    };
-
-    createClient({
-      baseUrl: '/api',
-      logger,
-      layers: [a, b, c],
-    });
-
-    expect(warn).not.toHaveBeenCalled();
+    ).toThrow(/withA.*withB.*stage 2/);
   });
 });
 
@@ -215,33 +180,31 @@ describe('Layer как шаблон', () => {
   });
 
   it('withRetry создаёт независимый warnedUnsafeRetry на каждый клиент', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    try {
-      const retryLayer = withRetry({
-        maxAttempts: 1,
-        warnOnUnsafeRetry: true,
-      });
+    const warn = vi.fn();
+    const retryLayer = withRetry({
+      maxAttempts: 1,
+      warnOnUnsafeRetry: true,
+    });
 
-      const mock1 = createMockFetch(() => ({ status: 500, body: {} }));
-      const client1 = createClient({
-        baseUrl: 'https://api.test',
-        fetch: mock1.fetch,
-        layers: [retryLayer],
-      });
+    const mock1 = createMockFetch(() => ({ status: 500, body: {} }));
+    const client1 = createClient({
+      baseUrl: 'https://api.test',
+      fetch: mock1.fetch,
+      logger: { warn },
+      layers: [retryLayer],
+    });
 
-      const mock2 = createMockFetch(() => ({ status: 500, body: {} }));
-      const client2 = createClient({
-        baseUrl: 'https://api.test',
-        fetch: mock2.fetch,
-        layers: [retryLayer],
-      });
+    const mock2 = createMockFetch(() => ({ status: 500, body: {} }));
+    const client2 = createClient({
+      baseUrl: 'https://api.test',
+      fetch: mock2.fetch,
+      logger: { warn },
+      layers: [retryLayer],
+    });
 
-      await expect(client1.post('/orders', {})).rejects.toBeDefined();
-      await expect(client2.post('/orders', {})).rejects.toBeDefined();
+    await expect(client1.post('/orders', {})).rejects.toBeDefined();
+    await expect(client2.post('/orders', {})).rejects.toBeDefined();
 
-      expect(warn).toHaveBeenCalledTimes(2);
-    } finally {
-      warn.mockRestore();
-    }
+    expect(warn).toHaveBeenCalledTimes(2);
   });
 });

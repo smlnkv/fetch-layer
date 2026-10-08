@@ -1,18 +1,17 @@
-import { safeCall } from '../shared/safe-call';
-
 import type { Client, Hooks, RequestFn } from './types';
 
 /**
  * Логгер для внутренних сообщений. Все методы опциональны.
  *
  * Библиотека вызывает:
- * - warn - предупреждение о небезопасном повторе;
+ * - warn - предупреждение о небезопасном повторе, стрим без skipRetry;
  * - info - успешный refresh токена, открытие и закрытие предохранителя;
  * - error - финальная ошибка запроса после всех повторов;
  * - debug - завершение запроса (успех или ошибка) с длительностью.
  *
- * По умолчанию warn и error делегируют в console; debug и info
- * молчат. Пустой объект полностью отключает вывод.
+ * Логгер не задан по умолчанию: библиотека не пишет в console
+ * без явного запроса. Передайте свой logger в ClientOptions, чтобы
+ * получать сообщения через него.
  */
 export interface Logger {
   debug?(message: string, ...args: unknown[]): void;
@@ -99,12 +98,13 @@ export interface Layer {
  * Проверяет три вещи:
  * - уникальность имён слоёв: дубликат приводит к ошибке;
  * - убывание stage: слои идут снаружи внутрь;
- * - дубликаты stage: предупреждение через logger, порядок таких
- *   слоёв определяется позицией в массиве.
+ * - дубликаты stage: два слоя с одинаковым stage дают ошибку,
+ *   потому что порядок между ними определяется позицией
+ *   в массиве, а это неявно.
  *
  * @internal
  */
-export function validateLayerOrder(layers: readonly Layer[], logger?: Logger): void {
+export function validateLayerOrder(layers: readonly Layer[]): void {
   const seenNames = new Set<string>();
   const seenStages = new Map<number, string>();
   let prevStage = Infinity;
@@ -134,16 +134,15 @@ export function validateLayerOrder(layers: readonly Layer[], logger?: Logger): v
 
     const stageOwner = seenStages.get(layer.stage);
     if (stageOwner !== undefined) {
-      safeCall(() =>
-        logger?.warn?.(
-          `[fetch-layer] layers "${stageOwner}" and "${layer.name}" have the same stage ` +
-            `${layer.stage}. Order between them is determined by their position in the ` +
-            `layers array. Use fractional stages (for example 2.5) to avoid ambiguity.`,
-        ),
+      throw new Error(
+        `createClient: layers "${stageOwner}" and "${layer.name}" have the same stage ` +
+          `${layer.stage}. Order between them would be determined by position in the ` +
+          `layers array, which is ambiguous. Use fractional stages (for example 2.5) ` +
+          `to make the order explicit.`,
       );
-    } else {
-      seenStages.set(layer.stage, layer.name);
     }
+
+    seenStages.set(layer.stage, layer.name);
 
     prevStage = layer.stage;
     prevName = layer.name;
