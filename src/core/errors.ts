@@ -32,7 +32,6 @@ const AUTH_ERROR_CODES = new Set([
   'AUTH_PROVIDER_ERROR',
   'REFRESH_TIMEOUT',
   'REFRESH_CIRCUIT_OPEN',
-  'REFRESH_COOLDOWN',
 ]);
 
 /**
@@ -42,8 +41,8 @@ const AUTH_ERROR_CODES = new Set([
  *
  * - ABORTED, TIMEOUT, NETWORK_ERROR, PARSE_ERROR,
  *   BODY_SERIALIZATION_ERROR - транспорт;
- * - AUTH_PROVIDER_ERROR, REFRESH_TIMEOUT, REFRESH_CIRCUIT_OPEN,
- *   REFRESH_COOLDOWN - авторизация;
+ * - AUTH_PROVIDER_ERROR, REFRESH_TIMEOUT, REFRESH_CIRCUIT_OPEN -
+ *   авторизация;
  * - IDEMPOTENCY_STORAGE_ERROR, IDEMPOTENCY_KEY_INVALID -
  *   идемпотентность.
  *
@@ -95,11 +94,15 @@ export class ApiError extends Error {
   readonly details?: unknown;
 
   /**
-   * true, если ответа от сервера нет: сетевые ошибки, таймауты, 5xx.
+   * true, если состояние операции на сервере неизвестно.
    *
-   * Для 408 и 429 остаётся false: сервер ответил. Свойство про
-   * доставку, а не про состояние операции. Для решений о повторе
-   * используйте isRetryable.
+   * - network, timeout: запрос мог не дойти или ответ мог потеряться.
+   * - 5xx: сервер ответил с ошибкой, но мог частично применить
+   *   операцию до сбоя.
+   * - 408/429: false - сервер ответил и явно не принял операцию.
+   * - parse: false - ответ получен полностью, состояние известно.
+   *
+   * Для решений о безопасном повторе используйте isRetryable.
    */
   readonly isUncertain: boolean;
 
@@ -166,7 +169,7 @@ export class ApiError extends Error {
    * true для:
    * - ответов 401 и 403 (status);
    * - кодов AUTH_PROVIDER_ERROR, REFRESH_TIMEOUT,
-   *   REFRESH_CIRCUIT_OPEN, REFRESH_COOLDOWN.
+   *   REFRESH_CIRCUIT_OPEN.
    */
   get isAuthError(): boolean {
     return AUTH_ERROR_CODES.has(this.code) || this.status === 401 || this.status === 403;
@@ -182,7 +185,7 @@ export class ApiError extends Error {
    * false для:
    * - отмены (kind abort);
    * - ошибок авторизации: 401, 403 и кодов AUTH_PROVIDER_ERROR,
-   *   REFRESH_TIMEOUT, REFRESH_CIRCUIT_OPEN, REFRESH_COOLDOWN;
+   *   REFRESH_TIMEOUT, REFRESH_CIRCUIT_OPEN;
    * - остальных 4xx.
    */
   get isRetryable(): boolean {

@@ -70,12 +70,7 @@ describe('ApiError - isNetwork и isCancelled', () => {
 
 describe('ApiError - isAuthError', () => {
   it('true для auth-кодов, 401, 403; пересекается с isClientError', () => {
-    for (const code of [
-      'AUTH_PROVIDER_ERROR',
-      'REFRESH_TIMEOUT',
-      'REFRESH_CIRCUIT_OPEN',
-      'REFRESH_COOLDOWN',
-    ]) {
+    for (const code of ['AUTH_PROVIDER_ERROR', 'REFRESH_TIMEOUT', 'REFRESH_CIRCUIT_OPEN']) {
       expect(new ApiError({ kind: 'unknown', code, message: 'x' }).isAuthError).toBe(true);
     }
 
@@ -112,12 +107,7 @@ describe('ApiError - isRetryable', () => {
     expect(new ApiError({ kind: 'storage', message: 'x' }).isRetryable).toBe(false);
 
     // Auth-коды не повторяются, даже если kind позволяет.
-    for (const code of [
-      'AUTH_PROVIDER_ERROR',
-      'REFRESH_TIMEOUT',
-      'REFRESH_CIRCUIT_OPEN',
-      'REFRESH_COOLDOWN',
-    ]) {
+    for (const code of ['AUTH_PROVIDER_ERROR', 'REFRESH_TIMEOUT', 'REFRESH_CIRCUIT_OPEN']) {
       expect(new ApiError({ kind: 'unknown', code, message: 'x' }).isRetryable).toBe(false);
     }
     expect(
@@ -177,8 +167,8 @@ describe('toApiError', () => {
     const err = toApiError(new SyntaxError('Unexpected token'));
     expect(err.kind).toBe('parse');
     expect(err.code).toBe('PARSE_ERROR');
-    // Ответ получен: сервер ответил, состояние операции известно.
-    // isUncertain относится к доставке, а не к парсингу.
+    // Ответ получен полностью: состояние операции на сервере
+    // известно, повтор безопасен.
     expect(err.isUncertain).toBe(false);
 
     const duck = { name: 'SyntaxError', message: 'cross-realm' };
