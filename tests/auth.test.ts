@@ -758,6 +758,60 @@ describe('resetRefreshCircuit', () => {
     const client2 = createTestClient({ fetch: mock2.fetch, auth: { provider } });
     expect(resetRefreshCircuit(client2)).toBe(true);
   });
+
+  it('reset во время активного refresh подавляет cooldown', async () => {
+    let refreshCalls = 0;
+    const refreshResolvers: Array<() => void> = [];
+
+    const provider: SessionProvider = {
+      getAuthHeaders: () => ({ Authorization: 'Bearer token' }),
+      refresh: async () => {
+        refreshCalls++;
+        await new Promise<void>((resolve) => {
+          refreshResolvers.push(resolve);
+        });
+        return { status: 'success', headers: { Authorization: 'Bearer new' } };
+      },
+    };
+
+    // Мок всегда отвечает 401, чтобы после успешного refresh
+    // auth-слой получил 401 на повтор и завершил запрос ошибкой.
+    const mock = createMockFetch(() => ({
+      status: 401,
+      body: { code: 'SESSION_INVALID' },
+    }));
+
+    const client = createTestClient({
+      fetch: mock.fetch,
+      auth: { provider, circuitBreakerMs: 60_000 },
+    });
+
+    const promise1 = client.get('/a');
+    promise1.catch(() => {});
+
+    // Ждём, пока refresh начнётся.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(refreshCalls).toBe(1);
+
+    // Сбрасываем circuit во время активного refresh.
+    resetRefreshCircuit(client);
+
+    // Разрешаем первый refresh завершиться. Запрос завершится
+    // ошибкой 401: повтор с новым токеном тоже отвергнут.
+    refreshResolvers[0]!();
+    await expect(promise1).rejects.toBeDefined();
+
+    // Запрос 2 снова получит 401. Cooldown не сработает: reset
+    // подавил запись lastSuccessfulRefreshAt в первом refresh.
+    const promise2 = client.get('/b');
+    promise2.catch(() => {});
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(refreshCalls).toBe(2);
+
+    refreshResolvers[1]!();
+    await expect(promise2).rejects.toBeDefined();
+  });
 });
 
 describe('SingleFlight', () => {

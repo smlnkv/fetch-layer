@@ -51,6 +51,14 @@ export class RefreshManager {
    */
   private lastSuccessfulRefreshAt = 0;
 
+  /**
+   * Растёт при каждом reset(). doRefresh запоминает значение до
+   * await, после - сравнивает. Если reset() был во время refresh,
+   * результат не записывается в lastSuccessfulRefreshAt: сброс
+   * обнуляет cooldown, следующий 401 запускает refresh.
+   */
+  private resetCount = 0;
+
   constructor(
     callbacks: RefreshManagerCallbacks = {},
     refreshTimeoutMs = DEFAULT_REFRESH_TIMEOUT_MS,
@@ -71,6 +79,7 @@ export class RefreshManager {
    * присоединится к прежнему промису, и сброс не даст эффекта.
    */
   reset(): void {
+    this.resetCount++;
     this.singleFlight.forget();
     this.circuit.close();
   }
@@ -116,6 +125,8 @@ export class RefreshManager {
     provider: SessionProvider,
     circuitBreakerMs: number,
   ): Promise<RefreshManagerResult> {
+    const resetCountAtStart = this.resetCount;
+
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
 
@@ -182,7 +193,12 @@ export class RefreshManager {
     }
 
     if (result.status === 'success') {
-      this.lastSuccessfulRefreshAt = Date.now();
+      // Если во время refresh был вызван reset(), не записываем
+      // lastSuccessfulRefreshAt: сброс означает, что cooldown
+      // не должен применяться к следующему 401.
+      if (this.resetCount === resetCountAtStart) {
+        this.lastSuccessfulRefreshAt = Date.now();
+      }
     }
 
     return result;
