@@ -79,7 +79,7 @@ export interface RetryOptions {
    * не повторяются, даже если функция вернёт true.
    *
    * Падение колбэка не подменяет исходную ошибку: применяется
-   * та же политика, что и без колбэка.
+   * дефолтная политика, сообщение об ошибке уходит в warn.
    *
    * @param attempt - номер провалившейся попытки, считая с 1.
    */
@@ -91,7 +91,7 @@ export interface RetryOptions {
    * [MIN_RETRY_MS, maxDelayMs].
    *
    * Падение колбэка не подменяет исходную ошибку: применяется
-   * та же задержка, что и без колбэка.
+   * дефолтная задержка, сообщение об ошибке уходит в warn.
    *
    * @param attempt - номер провалившейся попытки, считая с 1.
    */
@@ -277,8 +277,18 @@ export function withRetry(options: RetryOptions = {}): Layer {
 
             const failedAttempt = attempt + 1;
 
-            const retryDecision =
-              safeCall(() => retryPolicy(err, failedAttempt)) ?? defaultShouldRetry(err);
+            let retryDecision: boolean;
+            try {
+              retryDecision = retryPolicy(err, failedAttempt);
+            } catch (policyError) {
+              safeCall(() =>
+                warn?.(
+                  `[fetch-layer] withRetry: shouldRetry threw, falling back to default. ` +
+                    `${policyError instanceof Error ? policyError.message : String(policyError)}`,
+                ),
+              );
+              retryDecision = defaultShouldRetry(err);
+            }
 
             if (!retryDecision) throw err;
 
@@ -289,8 +299,18 @@ export function withRetry(options: RetryOptions = {}): Layer {
               if (err.retryAfterMs > maxDelayMs) throw err;
               delay = clampDelay(err.retryAfterMs, MIN_RETRY_MS);
             } else {
-              const computed =
-                safeCall(() => delayPolicy(failedAttempt, err)) ?? defaultCompute(failedAttempt);
+              let computed: number;
+              try {
+                computed = delayPolicy(failedAttempt, err);
+              } catch (policyError) {
+                safeCall(() =>
+                  warn?.(
+                    `[fetch-layer] withRetry: computeDelay threw, falling back to default. ` +
+                      `${policyError instanceof Error ? policyError.message : String(policyError)}`,
+                  ),
+                );
+                computed = defaultCompute(failedAttempt);
+              }
 
               delay = Math.min(clampDelay(computed, MIN_RETRY_MS), maxDelayMs);
             }

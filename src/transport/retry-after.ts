@@ -19,19 +19,24 @@ const IMF_FIXDATE_RE =
  * определяет withRetry. Числовой формат проверяется строго
  * (/^\d+$/), чтобы не пропустить '1e3', '0x10', '+5', '1.5' и другие
  * значения, которые Number молча принимает.
+ *
+ * Leading и trailing OWS срезаются до проверок: RFC 7230 разрешает
+ * пробелы вокруг значения заголовка.
  */
 export function parseRetryAfterMs(header: string | null): number | undefined {
   if (!header) return undefined;
 
-  if (/^\d+$/.test(header)) {
-    return Math.max(0, Number(header) * 1000);
+  const trimmed = header.trim();
+
+  if (/^\d+$/.test(trimmed)) {
+    return Math.max(0, Number(trimmed) * 1000);
   }
 
-  if (!IMF_FIXDATE_RE.test(header)) {
+  if (!IMF_FIXDATE_RE.test(trimmed)) {
     return undefined;
   }
 
-  const timestamp = Date.parse(header);
+  const timestamp = Date.parse(trimmed);
   if (Number.isFinite(timestamp)) {
     return Math.max(0, timestamp - Date.now());
   }

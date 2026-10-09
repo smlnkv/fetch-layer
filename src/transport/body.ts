@@ -138,7 +138,8 @@ function prepareJsonBody(value: unknown): PreparedBody {
  * Для json тело читается как текст, чтобы отличить пустой ответ
  * от невалидного. Пустая строка даёт undefined - это покрывает
  * DELETE и подобные эндпоинты, отвечающие 200 OK с Content-Length: 0.
- * Невалидный JSON даёт PARSE_ERROR.
+ * Невалидный JSON даёт PARSE_ERROR с указанием content-type:
+ * если сервер вернул HTML, это видно сразу.
  *
  * Проверка `!response.body` в transport.ts отсекает 204, 304 и HEAD
  * до вызова этой функции.
@@ -167,10 +168,13 @@ export async function parseResponse(
         return response.body;
     }
   } catch (e) {
+    const contentType = response.headers.get('content-type');
     throw new ApiError({
       kind: 'parse',
       code: 'PARSE_ERROR',
-      message: `Failed to parse response body as ${responseType}`,
+      message: contentType
+        ? `Failed to parse response body as ${responseType} (content-type: ${contentType})`
+        : `Failed to parse response body as ${responseType}`,
       status: response.status,
       cause: e,
     });

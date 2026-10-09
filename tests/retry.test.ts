@@ -456,6 +456,34 @@ describe('retry - shouldRetry', () => {
     await client2.get('/users');
     expect(attempts2).toBe(2);
   });
+
+  it('падение shouldRetry: warn и fallback на дефолтную политику', async () => {
+    const warn = vi.fn();
+    let attempts = 0;
+    const mock = createMockFetch(() => {
+      attempts++;
+      if (attempts < 2) return { status: 500, body: {} };
+      return { body: { ok: true } };
+    });
+
+    const client = createRetryClient({
+      fetch: mock.fetch,
+      maxAttempts: 3,
+      sleep: noSleep,
+      shouldRetry: () => {
+        throw new Error('boom');
+      },
+      warn,
+    });
+
+    await client.get('/users');
+
+    // Fallback на defaultShouldRetry: 500 повторяется.
+    expect(attempts).toBe(2);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]?.[0]).toMatch(/shouldRetry threw/);
+    expect(warn.mock.calls[0]?.[0]).toMatch(/boom/);
+  });
 });
 
 describe('retry - computeDelay', () => {
@@ -510,6 +538,38 @@ describe('retry - computeDelay', () => {
 
     await expect(client.get('/users')).rejects.toBeDefined();
     expect(attempts).toEqual([1, 2]);
+  });
+
+  it('падение computeDelay: warn и fallback на дефолтную задержку', async () => {
+    const warn = vi.fn();
+    const sleep = createSleepSpy();
+    let attempts = 0;
+    const mock = createMockFetch(() => {
+      attempts++;
+      if (attempts < 2) return { status: 500, body: {} };
+      return { body: { ok: true } };
+    });
+
+    const client = createRetryClient({
+      fetch: mock.fetch,
+      maxAttempts: 3,
+      sleep,
+      jitterRatio: 0,
+      baseDelayMs: 300,
+      computeDelay: () => {
+        throw new Error('boom');
+      },
+      warn,
+    });
+
+    await client.get('/users');
+
+    // Fallback на defaultCompute: baseDelayMs * 2^0 = 300.
+    expect(attempts).toBe(2);
+    expect(sleep.mock.calls[0]?.[0]).toBe(300);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]?.[0]).toMatch(/computeDelay threw/);
+    expect(warn.mock.calls[0]?.[0]).toMatch(/boom/);
   });
 });
 

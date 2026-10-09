@@ -176,10 +176,10 @@ describe('client - ошибки', () => {
     }
   });
 
-  it('обрабатывает невалидный JSON в успешном ответе', async () => {
+  it('обрабатывает невалидный JSON и указывает content-type в сообщении', async () => {
     const mock = createMockFetch(() => ({
       bodyAsText: 'not json',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'text/html; charset=utf-8' },
     }));
     const client = createTestClient({ fetch: mock.fetch });
 
@@ -190,6 +190,8 @@ describe('client - ошибки', () => {
       const err = toApiError(e);
       expect(err.kind).toBe('parse');
       expect(err.code).toBe('PARSE_ERROR');
+      expect(err.message).toMatch(/as json/);
+      expect(err.message).toMatch(/text\/html/);
     }
   });
 

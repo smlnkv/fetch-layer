@@ -150,6 +150,21 @@ describe('parseRetryAfterMs', () => {
     expect(parseRetryAfterMs('0')).toBe(0);
   });
 
+  it('срезает leading и trailing OWS до разбора', () => {
+    expect(parseRetryAfterMs(' 5 ')).toBe(5000);
+    expect(parseRetryAfterMs('  30  ')).toBe(30_000);
+    expect(parseRetryAfterMs('\t5\t')).toBe(5000);
+
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-09-13T12:00:00Z'));
+      const future = new Date('2026-09-13T12:00:30Z').toUTCString();
+      expect(parseRetryAfterMs(` ${future} `)).toBe(30_000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('парсит IMF-fixdate и возвращает 0 для даты в прошлом', () => {
     vi.useFakeTimers();
     try {
@@ -173,7 +188,6 @@ describe('parseRetryAfterMs', () => {
     '+5',
     '-5',
     '1.5',
-    ' 5 ',
     'GMT',
     '-5 GMT',
     '+5 GMT',
