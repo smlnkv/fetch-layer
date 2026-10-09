@@ -1,5 +1,5 @@
 import { ApiError } from '../../core/errors';
-import { bodyKindName, classifyBody, isSerializableKind } from '../../shared/classify-body';
+import { classifyBody, getTypeName, isSerializableKind } from '../../shared/classify-body';
 
 /**
  * Стабильная сериализация значения. Ключи объектов сортируются
@@ -18,7 +18,6 @@ import { bodyKindName, classifyBody, isSerializableKind } from '../../shared/cla
  *   RegExp, Error.
  *
  * @public
- * @stableSince 0.1.0
  */
 export function stableSerialize(value: unknown): string {
   try {
@@ -51,7 +50,7 @@ function serialize(value: unknown, seen: WeakSet<object>): string {
   // не должен обходиться через пользовательский toJSON.
   const kind = classifyBody(value);
   if (!isSerializableKind(kind)) {
-    throw new TypeError(`Cannot serialize ${bodyKindName(kind)} to a stable JSON string`);
+    throw new TypeError(`Cannot serialize ${getTypeName(value)} to a stable JSON string`);
   }
 
   // Как в JSON.stringify: позволяет работать с Date, URL и другими
@@ -67,7 +66,7 @@ function serialize(value: unknown, seen: WeakSet<object>): string {
       // и превратилось в {}, дав одинаковый отпечаток разным телам.
       const afterKind = classifyBody(value);
       if (!isSerializableKind(afterKind)) {
-        throw new TypeError(`toJSON returned ${bodyKindName(afterKind)}: cannot serialize`);
+        throw new TypeError(`toJSON returned ${getTypeName(value)}: cannot serialize`);
       }
     }
   }

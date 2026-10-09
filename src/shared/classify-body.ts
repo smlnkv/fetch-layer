@@ -14,32 +14,22 @@ export type BodyKind =
   | 'string'
   | 'form-data'
   | 'blob'
-  | 'file'
-  | 'array-buffer'
-  | 'typed-array'
-  | 'readable-stream'
-  | 'node-readable'
+  | 'binary'
+  | 'stream'
   | 'url-search-params'
-  | 'map'
-  | 'set'
-  | 'weak-map'
-  | 'weak-set'
-  | 'regexp'
-  | 'error';
+  | 'unsupported';
 
 /**
- * Подмножество BodyKind, которое JSON.stringify превратил бы в {}
- * или в бессмысленное значение. Type guard: после isUnsupportedKind
- * компилятор знает, что kind не входит в этот набор, и switch
- * по остальным категориям становится исчерпывающим.
+ * Категории, которые JSON.stringify превратил бы в {} или
+ * в бессмысленное значение. Вложенные значения этих категорий
+ * отклоняются в prepareJsonBody.
  */
-export type UnsupportedKind = 'map' | 'set' | 'weak-map' | 'weak-set' | 'regexp' | 'error';
+export type UnsupportedKind = 'unsupported';
 
 /**
- * File наследуется от Blob, но имеет собственный Symbol.toStringTag.
- * Отдельная категория нужна для сообщений об ошибках: разработчик,
- * передавший File, должен видеть File, а не Blob. Обрабатываются
- * они одинаково.
+ * Blob и File обрабатываются одинаково, отдельная категория для
+ * File не нужна: точное имя типа для сообщений об ошибках даёт
+ * getTypeName.
  *
  * Node.js stream.Readable не имеет собственного тега и требует
  * duck-typing: проверяются pipe, on и Symbol.asyncIterator.
@@ -57,37 +47,29 @@ export function classifyBody(value: unknown): BodyKind {
   switch (tag) {
     case '[object FormData]':
       return 'form-data';
-    case '[object File]':
-      return 'file';
     case '[object Blob]':
+    case '[object File]':
       return 'blob';
     case '[object ArrayBuffer]':
-      return 'array-buffer';
+      return 'binary';
     case '[object ReadableStream]':
-      return 'readable-stream';
+      return 'stream';
     case '[object URLSearchParams]':
       return 'url-search-params';
     case '[object Map]':
-      return 'map';
     case '[object Set]':
-      return 'set';
     case '[object WeakMap]':
-      return 'weak-map';
     case '[object WeakSet]':
-      return 'weak-set';
     case '[object RegExp]':
-      return 'regexp';
     case '[object Error]':
-      return 'error';
+      return 'unsupported';
   }
 
   if (typeof value === 'string') return 'string';
 
-  if (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(value)) {
-    return 'typed-array';
-  }
+  if (ArrayBuffer.isView(value)) return 'binary';
 
-  if (isNodeReadableBody(value)) return 'node-readable';
+  if (isNodeReadable(value)) return 'stream';
 
   return 'json';
 }
@@ -102,19 +84,12 @@ export function isSerializableKind(kind: BodyKind): boolean {
 }
 
 /**
- * true для типов, которые JSON.stringify превратил бы в {} на верхнем
- * уровне. Транспорт отклоняет их до отправки: без этой проверки
- * сервер получил бы пустой объект вместо данных.
+ * true для типов, которые JSON.stringify превратил бы в {} на
+ * верхнем уровне. Транспорт отклоняет их до отправки: без этой
+ * проверки сервер получил бы пустой объект вместо данных.
  */
 export function isUnsupportedKind(kind: BodyKind): kind is UnsupportedKind {
-  return (
-    kind === 'map' ||
-    kind === 'set' ||
-    kind === 'weak-map' ||
-    kind === 'weak-set' ||
-    kind === 'regexp' ||
-    kind === 'error'
-  );
+  return kind === 'unsupported';
 }
 
 export function isSerializableBody(value: unknown): boolean {
@@ -128,37 +103,18 @@ export function isSerializableBody(value: unknown): boolean {
  * retry-слой отключает повторы.
  */
 export function isStreamingBody(value: unknown): boolean {
-  const kind = classifyBody(value);
-  return kind === 'readable-stream' || kind === 'node-readable';
+  return classifyBody(value) === 'stream';
 }
 
-const KIND_NAMES: Record<BodyKind, string> = {
-  undefined: 'undefined',
-  json: 'object',
-  string: 'string',
-  'form-data': 'FormData',
-  blob: 'Blob',
-  file: 'File',
-  'array-buffer': 'ArrayBuffer',
-  'typed-array': 'TypedArray',
-  'readable-stream': 'ReadableStream',
-  'node-readable': 'NodeReadable',
-  'url-search-params': 'URLSearchParams',
-  map: 'Map',
-  set: 'Set',
-  'weak-map': 'WeakMap',
-  'weak-set': 'WeakSet',
-  regexp: 'RegExp',
-  error: 'Error',
-};
-
 /**
- * Человекочитаемое имя категории для сообщений об ошибках.
- * Отдельная от BodyKind, потому что категория - это про логику,
- * а имя - про текст, который увидит разработчик.
+ * Человекочитаемое имя типа для сообщений об ошибках. Опирается
+ * на Symbol.toStringTag и duck-typing для Node.js stream.
+ * Отдельная от BodyKind: категория описывает логику обработки,
+ * имя - то, что увидит разработчик.
  */
-export function bodyKindName(kind: BodyKind): string {
-  return KIND_NAMES[kind];
+export function getTypeName(value: unknown): string {
+  if (isNodeReadable(value)) return 'NodeReadable';
+  return Object.prototype.toString.call(value).slice(8, -1);
 }
 
 interface NodeReadableLike {
@@ -167,7 +123,7 @@ interface NodeReadableLike {
   [Symbol.asyncIterator]: () => AsyncIterator<unknown>;
 }
 
-function isNodeReadableBody(value: unknown): value is NodeReadableLike {
+function isNodeReadable(value: unknown): value is NodeReadableLike {
   if (typeof value !== 'object' || value === null) return false;
   const candidate = value as Record<string | symbol, unknown>;
   return (

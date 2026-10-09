@@ -1,7 +1,7 @@
 import { ApiError } from '../core/errors';
 import {
-  bodyKindName,
   classifyBody,
+  getTypeName,
   isSerializableKind,
   isUnsupportedKind,
 } from '../shared/classify-body';
@@ -58,7 +58,7 @@ export function prepareBody(value: unknown): PreparedBody {
   const kind = classifyBody(value);
 
   if (isUnsupportedKind(kind)) {
-    throw unsupportedBodyError(bodyKindName(kind));
+    throw unsupportedBodyError(getTypeName(value));
   }
 
   switch (kind) {
@@ -68,8 +68,7 @@ export function prepareBody(value: unknown): PreparedBody {
     case 'form-data':
       return { body: value as BodyInit, contentType: undefined };
 
-    case 'blob':
-    case 'file': {
+    case 'blob': {
       const blob = value as Blob;
       return {
         body: value as BodyInit,
@@ -77,12 +76,10 @@ export function prepareBody(value: unknown): PreparedBody {
       };
     }
 
-    case 'array-buffer':
-    case 'typed-array':
+    case 'binary':
       return { body: value as BodyInit, contentType: 'application/octet-stream' };
 
-    case 'readable-stream':
-    case 'node-readable':
+    case 'stream':
       return { body: value as BodyInit, contentType: undefined };
 
     case 'url-search-params':
@@ -104,7 +101,7 @@ function prepareJsonBody(value: unknown): PreparedBody {
     const json = JSON.stringify(value, (_key, val) => {
       const kind = classifyBody(val);
       if (!isSerializableKind(kind)) {
-        throw new UnsupportedBodyTypeError(bodyKindName(kind));
+        throw new UnsupportedBodyTypeError(getTypeName(val));
       }
       return val;
     });
