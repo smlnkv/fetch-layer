@@ -21,8 +21,6 @@ export type { Layer, LayerContext } from './core/layer';
 
 export type { ErrorBodyFormat, ErrorBodyParser } from './core/error-body';
 
-export { stableSerialize } from './layers/idempotency/serialize';
-
 export { createMemoryStorage, fromWebStorage, type StorageLike } from './shared/storage';
 
 export type {

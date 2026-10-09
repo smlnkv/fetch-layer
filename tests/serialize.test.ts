@@ -4,7 +4,7 @@ import { Readable } from 'node:stream';
 
 import { describe, expect, it } from 'vitest';
 
-import { stableSerialize } from '../src/index';
+import { stableSerialize } from '../src/layers/idempotency/index';
 
 describe('stableSerialize - примитивы', () => {
   it('сериализует примитивы; NaN, Infinity, undefined, функции и Symbol как null', () => {
