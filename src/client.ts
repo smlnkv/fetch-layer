@@ -1,11 +1,9 @@
-import { toApiError } from './core/errors';
 import { applyLayers, runAttach, validateLayerOrder } from './core/layer';
-import { safeCall } from './shared/safe-call';
 import { assertNonEmptyString } from './shared/validators';
 import { mergeHeaders } from './transport/headers';
 import { createBaseRequest, type TransportOptions } from './transport/transport';
 
-import type { Layer, LayerContext, Logger } from './core/layer';
+import type { Layer, LayerContext } from './core/layer';
 import type {
   Client,
   HttpMethod,
@@ -25,22 +23,13 @@ const MIN_TIMEOUT_MS = 100;
  */
 type PublicRequestFn = <T = unknown>(config: RequestConfig) => Promise<T>;
 
-/**
- * Логгер по умолчанию: пустой объект. Библиотека не пишет в console
- * без явного запроса. Передайте свой logger, чтобы получать
- * предупреждения и ошибки через него.
- */
-const defaultLogger: Logger = {};
-
-/** Настройки клиента: все поля TransportOptions плюс logger и layers. */
+/** Настройки клиента: все поля TransportOptions плюс warn и layers. */
 export interface ClientOptions extends TransportOptions {
   /**
-   * Логгер для внутренних сообщений. По умолчанию не задан:
-   * библиотека молчит. Передайте свой logger, чтобы получать
-   * предупреждения и ошибки через него. Пустой объект эквивалентен
-   * отсутствию логгера.
+   * Приёмник предупреждений о неверном использовании API.
+   * По умолчанию console.warn. Передайте null, чтобы отключить.
    */
-  logger?: Logger;
+  warn?: ((message: string) => void) | null;
 
   /**
    * Слои клиента. Применяются снаружи внутрь: первый в массиве
@@ -91,12 +80,14 @@ export function createClient(options: ClientOptions): Client {
   validateOptions(options);
 
   const layers = options.layers ?? [];
-  const logger = options.logger ?? defaultLogger;
 
   validateLayerOrder(layers);
 
+  // null отключает предупреждения; undefined - console.warn по умолчанию.
+  const warn = options.warn === undefined ? console.warn : (options.warn ?? undefined);
+
   const context: LayerContext = {
-    logger,
+    warn,
   };
 
   const baseRequest = createBaseRequest(options);
@@ -119,32 +110,7 @@ export function createClient(options: ClientOptions): Client {
       method: (resolved.method ?? 'GET').toUpperCase() as HttpMethod,
     };
 
-    const method = finalConfig.method as HttpMethod;
-    const t0 = Date.now();
-
-    try {
-      const result = await pipeline<T>(finalConfig);
-      safeCall(() =>
-        logger.debug?.(`[fetch-layer] ${method} ${finalConfig.path} ok in ${Date.now() - t0}ms`),
-      );
-      return result;
-    } catch (e) {
-      const error = toApiError(e);
-
-      safeCall(() =>
-        logger.debug?.(
-          `[fetch-layer] ${method} ${finalConfig.path} failed in ${Date.now() - t0}ms: ${error.code}`,
-        ),
-      );
-
-      if (!error.isCancelled) {
-        safeCall(() =>
-          logger.error?.(`[fetch-layer] ${method} ${finalConfig.path}: ${error.message}`),
-        );
-      }
-
-      throw error;
-    }
+    return pipeline<T>(finalConfig);
   };
 
   const client = makeClient(wrapped);

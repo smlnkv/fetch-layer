@@ -17,7 +17,7 @@ export { createClient, type ClientOptions } from './client';
 
 export { ApiError, toApiError, type ApiErrorKind } from './core/errors';
 
-export type { Layer, LayerContext, Logger } from './core/layer';
+export type { Layer, LayerContext } from './core/layer';
 
 export type { ErrorBodyFormat, ErrorBodyParser } from './core/error-body';
 

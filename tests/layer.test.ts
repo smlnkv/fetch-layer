@@ -219,7 +219,7 @@ describe('Layer как шаблон', () => {
     const client1 = createClient({
       baseUrl: 'https://api.test',
       fetch: mock1.fetch,
-      logger: { warn },
+      warn,
       layers: [retryLayer],
     });
 
@@ -227,7 +227,7 @@ describe('Layer как шаблон', () => {
     const client2 = createClient({
       baseUrl: 'https://api.test',
       fetch: mock2.fetch,
-      logger: { warn },
+      warn,
       layers: [retryLayer],
     });
 

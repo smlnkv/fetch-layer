@@ -1,31 +1,11 @@
 import type { Client, RequestFn } from './types';
 
 /**
- * Логгер для внутренних сообщений. Все методы опциональны.
- *
- * Библиотека вызывает:
- * - warn - предупреждение о небезопасном повторе, стрим без skipRetry;
- * - info - успешный refresh токена, открытие и закрытие предохранителя;
- * - error - финальная ошибка запроса после всех повторов;
- * - debug - завершение запроса (успех или ошибка) с длительностью.
- *
- * Логгер не задан по умолчанию: библиотека не пишет в console
- * без явного запроса. Передайте свой logger в ClientOptions, чтобы
- * получать сообщения через него.
- */
-export interface Logger {
-  debug?(message: string, ...args: unknown[]): void;
-  info?(message: string, ...args: unknown[]): void;
-  warn?(message: string, ...args: unknown[]): void;
-  error?(message: string, ...args: unknown[]): void;
-}
-
-/**
  * Контекст, который createClient передаёт каждому слою при сборке
  * pipeline. Относится к клиенту в целом, а не к конкретному слою.
  */
 export interface LayerContext {
-  readonly logger?: Logger;
+  readonly warn?: (message: string) => void;
 }
 
 /**

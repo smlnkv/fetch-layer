@@ -99,16 +99,14 @@ export function withAuth(options: AuthOptions): Layer {
     name: 'withAuth',
     stage: 1,
 
-    wrap(next: RequestFn, context: LayerContext): LayerWrapResult {
+    wrap(next: RequestFn, _context: LayerContext): LayerWrapResult {
       const manager = new RefreshManager(
         {
           onCircuitOpen: () => {
             safeCall(() => options.onCircuitOpen?.());
-            safeCall(() => context.logger?.info?.('[fetch-layer] refresh circuit opened'));
           },
           onCircuitClose: () => {
             safeCall(() => options.onCircuitClose?.());
-            safeCall(() => context.logger?.info?.('[fetch-layer] refresh circuit closed'));
           },
         },
         refreshTimeoutMs,
@@ -167,8 +165,6 @@ export function withAuth(options: AuthOptions): Layer {
           // success: повтор после успешного обновления. Заголовки
           // берём из refresh, если они там есть: это устраняет гонку,
           // когда реализация ещё не успела обновить своё состояние.
-          safeCall(() => context.logger?.info?.('[fetch-layer] token refreshed'));
-
           throwIfAborted(config.signal);
 
           const newHeaders = outcome.headers ?? (await safeGetAuthHeaders(provider));

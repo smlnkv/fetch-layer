@@ -22,7 +22,7 @@
  * });
  */
 
-export type { Layer, LayerContext, Logger } from '../core/layer';
+export type { Layer, LayerContext } from '../core/layer';
 
 export { withRetry, type RetryOptions } from './retry/layer';
 

@@ -198,12 +198,12 @@ export function withRetry(options: RetryOptions = {}): Layer {
       // Set живёт внутри wrap: каждый createClient получает свой
       // экземпляр, даже если один Layer передан в несколько клиентов.
       const warnedUnsafeRetry = new Set<string>();
-      const logger = context.logger;
+      const warn = context.warn;
 
       const warnUnsafeRetryOnce = (key: string, message: string): void => {
         if (warnedUnsafeRetry.has(key)) return;
         warnedUnsafeRetry.add(key);
-        safeCall(() => logger?.warn?.(message));
+        safeCall(() => warn?.(message));
       };
 
       let warnedStreamNoRetry = false;
@@ -222,7 +222,7 @@ export function withRetry(options: RetryOptions = {}): Layer {
           if (!warnedStreamNoRetry) {
             warnedStreamNoRetry = true;
             safeCall(() =>
-              logger?.warn?.(
+              warn?.(
                 '[fetch-layer] withRetry is enabled, but the request body is a stream. ' +
                   'Streams are single-use; retries are disabled for this request. ' +
                   'Use skipRetry: true to silence this warning, or pre-buffer the stream.',

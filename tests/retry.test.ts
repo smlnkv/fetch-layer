@@ -8,7 +8,7 @@ import { withRetry } from '../src/layers/index';
 
 import { createMockFetch, createTestClient } from './helpers';
 
-import type { ApiError, Client, Logger } from '../src/index';
+import type { ApiError, Client } from '../src/index';
 
 const createSleepSpy = () =>
   vi.fn<(ms: number, signal?: AbortSignal) => Promise<void>>(() => Promise.resolve());
@@ -27,7 +27,7 @@ interface RetryClientOptions {
   jitterRatio?: number;
   retryOnNetwork?: boolean;
   retryOnTimeout?: boolean;
-  logger?: Logger;
+  warn?: (message: string) => void;
 }
 
 function createRetryClient(options: RetryClientOptions): Client {
@@ -45,7 +45,7 @@ function createRetryClient(options: RetryClientOptions): Client {
       retryOnNetwork: options.retryOnNetwork,
       retryOnTimeout: options.retryOnTimeout,
     },
-    logger: options.logger,
+    warn: options.warn,
   });
 }
 
@@ -561,7 +561,7 @@ describe('retry - warnOnUnsafeRetry', () => {
       maxAttempts: 2,
       sleep: noSleep,
       warnOnUnsafeRetry: true,
-      logger: { warn },
+      warn,
     });
 
     await expect(client.post('/orders', {})).rejects.toBeDefined();
@@ -579,7 +579,7 @@ describe('retry - warnOnUnsafeRetry', () => {
       maxAttempts: 2,
       sleep: noSleep,
       warnOnUnsafeRetry: false,
-      logger: { warn },
+      warn,
     });
     await expect(client1.post('/orders', {})).rejects.toBeDefined();
 
@@ -589,7 +589,7 @@ describe('retry - warnOnUnsafeRetry', () => {
       maxAttempts: 2,
       sleep: noSleep,
       warnOnUnsafeRetry: true,
-      logger: { warn },
+      warn,
     });
     await expect(
       client2.post('/orders', {}, { headers: { 'Idempotency-Key': 'test-key' } }),
@@ -601,7 +601,7 @@ describe('retry - warnOnUnsafeRetry', () => {
       maxAttempts: 2,
       sleep: noSleep,
       warnOnUnsafeRetry: true,
-      logger: { warn },
+      warn,
     });
     await expect(client3.get('/users')).rejects.toBeDefined();
 
@@ -611,7 +611,7 @@ describe('retry - warnOnUnsafeRetry', () => {
       maxAttempts: 2,
       sleep: noSleep,
       warnOnUnsafeRetry: true,
-      logger: { warn },
+      warn,
     });
     await expect(client4.post('/orders', {}, { skipIdempotency: true })).rejects.toBeDefined();
 
@@ -623,7 +623,7 @@ describe('retry - warnOnUnsafeRetry', () => {
         source: { nextKey: () => 'auto-key' },
         headerName: 'X-Idempotency-Key',
       },
-      logger: { warn },
+      warn,
     });
     await expect(client5.post('/orders', {})).rejects.toBeDefined();
 
@@ -638,7 +638,7 @@ describe('retry - warnOnUnsafeRetry', () => {
       maxAttempts: 2,
       sleep: noSleep,
       warnOnUnsafeRetry: true,
-      logger: { warn },
+      warn,
     });
 
     await expect(client.post('/orders', { a: 1 })).rejects.toBeDefined();
@@ -656,7 +656,7 @@ describe('retry - warnOnUnsafeRetry', () => {
       maxAttempts: 2,
       sleep: noSleep,
       warnOnUnsafeRetry: true,
-      logger: { warn },
+      warn,
     });
 
     await expect(client.delete('/sessions/1')).rejects.toBeDefined();
@@ -682,7 +682,7 @@ describe('retry - потоковые тела', () => {
       fetch: mock.fetch,
       maxAttempts: 3,
       sleep: noSleep,
-      logger: { warn },
+      warn,
     });
 
     const stream = new ReadableStream({
@@ -729,7 +729,7 @@ describe('retry - потоковые тела', () => {
       fetch: mock.fetch,
       maxAttempts: 3,
       sleep: noSleep,
-      logger: { warn },
+      warn,
     });
 
     await expect(client.post('/upload', Readable.from(['a']))).rejects.toBeDefined();
@@ -750,7 +750,7 @@ describe('retry - потоковые тела', () => {
       fetch: mock.fetch,
       maxAttempts: 3,
       sleep: noSleep,
-      logger: { warn },
+      warn,
     });
 
     await expect(
