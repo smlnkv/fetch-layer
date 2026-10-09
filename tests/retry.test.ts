@@ -4,7 +4,7 @@ import { Readable } from 'node:stream';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { withRetry } from '../src/layers/index';
+import { withRetry, type RetryOptions } from '../src/layers/index';
 
 import { createMockFetch, createTestClient } from './helpers';
 
@@ -21,6 +21,7 @@ interface RetryClientOptions {
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
   shouldRetry?: (error: ApiError, attempt: number) => boolean;
   computeDelay?: (attempt: number, error: ApiError) => number;
+  onBeforeRetry?: RetryOptions['onBeforeRetry'];
   warnOnUnsafeRetry?: boolean;
   baseDelayMs?: number;
   maxDelayMs?: number;
@@ -38,6 +39,7 @@ function createRetryClient(options: RetryClientOptions): Client {
       sleep: options.sleep,
       shouldRetry: options.shouldRetry,
       computeDelay: options.computeDelay,
+      onBeforeRetry: options.onBeforeRetry,
       warnOnUnsafeRetry: options.warnOnUnsafeRetry,
       baseDelayMs: options.baseDelayMs,
       maxDelayMs: options.maxDelayMs,
@@ -549,6 +551,90 @@ describe('retry - валидация конфигурации', () => {
     expect(() => withRetry({ maxAttempts: 0 })).toThrow(/maxAttempts/);
     expect(() => withRetry({ baseDelayMs: -1 })).toThrow(/baseDelayMs/);
     expect(() => withRetry({ jitterRatio: -0.1 })).toThrow(/jitterRatio/);
+  });
+});
+
+describe('retry - onBeforeRetry', () => {
+  it('вызывается перед каждой попыткой, attempt начинается с 1', async () => {
+    const onBeforeRetry = vi.fn();
+
+    const mock = createMockFetch(() => ({ status: 500, body: {} }));
+    const client = createRetryClient({
+      fetch: mock.fetch,
+      maxAttempts: 3,
+      sleep: noSleep,
+      onBeforeRetry,
+    });
+
+    await expect(client.get('/users')).rejects.toBeDefined();
+
+    expect(onBeforeRetry).toHaveBeenCalledTimes(2);
+    expect(onBeforeRetry.mock.calls[0]?.[1]).toBe(1);
+    expect(onBeforeRetry.mock.calls[1]?.[1]).toBe(2);
+  });
+
+  it('может изменить конфиг', async () => {
+    let secondRequestHeader: string | undefined;
+
+    const mock = createMockFetch((_, __, headers) => {
+      if (headers['x-retry']) {
+        secondRequestHeader = headers['x-retry'];
+        return { body: { ok: true } };
+      }
+      return { status: 500, body: {} };
+    });
+
+    const client = createRetryClient({
+      fetch: mock.fetch,
+      maxAttempts: 3,
+      sleep: noSleep,
+      onBeforeRetry: (config) => ({
+        ...config,
+        headers: { ...config.headers, 'X-Retry': '1' },
+      }),
+    });
+
+    await client.get('/users');
+
+    expect(secondRequestHeader).toBe('1');
+  });
+
+  it('может остановить повторы через skipRetry', async () => {
+    let attempts = 0;
+    const mock = createMockFetch(() => {
+      attempts++;
+      return { status: 500, body: {} };
+    });
+
+    const client = createRetryClient({
+      fetch: mock.fetch,
+      maxAttempts: 5,
+      sleep: noSleep,
+      onBeforeRetry: (config) => ({ ...config, skipRetry: true }),
+    });
+
+    await expect(client.get('/users')).rejects.toMatchObject({ status: 500 });
+    expect(attempts).toBe(1);
+  });
+
+  it('падение onBeforeRetry не ломает запрос', async () => {
+    let attempts = 0;
+    const mock = createMockFetch(() => {
+      attempts++;
+      return { status: 500, body: {} };
+    });
+
+    const client = createRetryClient({
+      fetch: mock.fetch,
+      maxAttempts: 3,
+      sleep: noSleep,
+      onBeforeRetry: () => {
+        throw new Error('hook error');
+      },
+    });
+
+    await expect(client.get('/users')).rejects.toMatchObject({ status: 500 });
+    expect(attempts).toBe(3);
   });
 });
 

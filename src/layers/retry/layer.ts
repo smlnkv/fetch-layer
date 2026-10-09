@@ -99,12 +99,13 @@ export interface RetryOptions {
 
   /**
    * Вызывается перед каждой попыткой повтора. Может вернуть новый
-   * конфиг или undefined, чтобы оставить текущий. Например, заменить
-   * Idempotency-Key при 409.
+   * конфиг, чтобы изменить заголовки (например, заменить
+   * Idempotency-Key при 409). Вернув конфиг со skipRetry: true,
+   * останавливает повторы: ошибка пробрасывается сразу.
    *
    * @param attempt - номер попытки с 1. Первый повтор: attempt === 1.
    */
-  onRetry?: (
+  onBeforeRetry?: (
     config: ResolvedRequestConfig,
     attempt: number,
     error: ApiError,
@@ -156,6 +157,7 @@ export function withRetry(options: RetryOptions = {}): Layer {
     retryOnTimeout = true,
     shouldRetry,
     computeDelay,
+    onBeforeRetry,
     sleep = defaultSleep,
   } = options;
 
@@ -259,7 +261,7 @@ export function withRetry(options: RetryOptions = {}): Layer {
           );
         }
 
-        const config = initialConfig;
+        let config = initialConfig;
 
         for (let attempt = 0; attempt < maxAttempts; attempt++) {
           throwIfAborted(config.signal);
@@ -293,9 +295,10 @@ export function withRetry(options: RetryOptions = {}): Layer {
               delay = Math.min(clampDelay(computed, MIN_RETRY_MS), maxDelayMs);
             }
 
-            // onBeforeRetry может вернуть конфиг со skipRetry:
-            // следующей попытки не будет. Проверяем до sleep,
-            // чтобы не ждать зря.
+            // onBeforeRetry может заменить конфиг (например,
+            // Idempotency-Key при 409) или остановить повторы,
+            // вернув skipRetry: true.
+            config = safeCall(() => onBeforeRetry?.(config, failedAttempt, err)) ?? config;
             if (config.skipRetry) throw err;
 
             await sleep(delay, config.signal);
