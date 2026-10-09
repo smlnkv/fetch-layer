@@ -3,7 +3,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { createClient } from '../src/client';
-import { toApiError } from '../src/index';
+import { ApiError, toApiError, type Layer } from '../src/index';
 
 import { createMockFetch, createTestClient } from './helpers';
 
@@ -706,6 +706,37 @@ describe('client - валидация', () => {
     await expect(client.get('/users', { timeoutMs: 50 })).rejects.toThrow(
       /client: timeoutMs must be a number >= 100 ms/,
     );
+
+    expect(mock.calls).toHaveLength(0);
+  });
+
+  it('нормализует ошибку из пользовательского слоя', async () => {
+    const boom = new Error('boom');
+    const withBoom: Layer = {
+      name: 'withBoom',
+      wrap: () => ({
+        fn: () => {
+          throw boom;
+        },
+      }),
+    };
+
+    const mock = createMockFetch(() => ({ body: {} }));
+    const client = createClient({
+      baseUrl: 'https://api.test',
+      fetch: mock.fetch,
+      layers: [withBoom],
+    });
+
+    try {
+      await client.get('/users');
+      expect.fail('should have thrown');
+    } catch (e) {
+      const err = toApiError(e);
+      expect(err).toBeInstanceOf(ApiError);
+      expect(err.kind).toBe('unknown');
+      expect(err.message).toBe('boom');
+    }
 
     expect(mock.calls).toHaveLength(0);
   });

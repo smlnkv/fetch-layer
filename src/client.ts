@@ -1,3 +1,4 @@
+import { toApiError } from './core/errors';
 import { applyLayers, runAttach, validateLayerOrder } from './core/layer';
 import { assertNonEmptyString } from './shared/validators';
 import { mergeHeaders } from './transport/headers';
@@ -110,7 +111,14 @@ export function createClient(options: ClientOptions): Client {
       method: (resolved.method ?? 'GET').toUpperCase() as HttpMethod,
     };
 
-    return pipeline<T>(finalConfig);
+    // Ошибка из пользовательского слоя может быть не ApiError.
+    // Контракт: всё, что выбрасывается наружу, нормализовано.
+    // toApiError идемпотентен, для ошибок транспорта вернёт тот же объект.
+    try {
+      return await pipeline<T>(finalConfig);
+    } catch (e) {
+      throw toApiError(e);
+    }
   };
 
   const client = makeClient(wrapped);
