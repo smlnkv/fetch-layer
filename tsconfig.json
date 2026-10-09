@@ -14,12 +14,6 @@
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": false,
 
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
-
-    "outDir": "./dist",
-
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "isolatedModules": true,

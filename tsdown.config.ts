@@ -13,7 +13,7 @@ export default defineConfig({
   target: 'es2022',
   dts: true,
   clean: true,
-  sourcemap: true,
+  sourcemap: false,
   treeshake: true,
   minify: true,
 });
