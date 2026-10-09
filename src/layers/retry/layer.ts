@@ -14,6 +14,14 @@ import { getHeader } from '../../transport/headers';
 import type { Layer, LayerContext, LayerWrapResult } from '../../core/layer';
 import type { RequestFn, ResolvedRequestConfig } from '../../core/types';
 
+/**
+ * Имя заголовка идемпотентности по умолчанию. Используется для
+ * предупреждения о небезопасном повторе, когда withIdempotency
+ * не подключён, а приложение задало ключ вручную. Если маркер
+ * idempotency в конфиге есть, заголовок не проверяется.
+ */
+const DEFAULT_IDEMPOTENCY_HEADER = 'Idempotency-Key';
+
 export interface RetryOptions {
   /**
    * Максимальное количество попыток, включая первую. По умолчанию 3,
@@ -44,19 +52,13 @@ export interface RetryOptions {
    * Предупреждать о повторе мутирующего запроса без заголовка
    * идемпотентности. По умолчанию true.
    *
-   * Предупреждение не выводится, если приложение задало заголовок
-   * само или передало skipIdempotency: true. Выводится один раз
-   * на метод и корневой сегмент пути: для DELETE /sessions/123
-   * корневой сегмент - sessions.
+   * Предупреждение не выводится, если withIdempotency применил
+   * ключ, приложение задало заголовок Idempotency-Key само или
+   * передало skipIdempotency: true. Выводится один раз на метод
+   * и корневой сегмент пути: для DELETE /sessions/123 корневой
+   * сегмент - sessions.
    */
   warnOnUnsafeRetry?: boolean;
-
-  /**
-   * Имя заголовка идемпотентности для проверки в предупреждении.
-   * Укажите то же значение, что и в withIdempotency, если используете
-   * кастомное. По умолчанию Idempotency-Key.
-   */
-  idempotencyHeaderName?: string;
 
   /**
    * Повторять ли сетевые ошибки (kind network). По умолчанию true.
@@ -150,7 +152,6 @@ export function withRetry(options: RetryOptions = {}): Layer {
     maxDelayMs: rawMaxDelayMs = 10_000,
     jitterRatio = 0.15,
     warnOnUnsafeRetry = true,
-    idempotencyHeaderName = 'Idempotency-Key',
     retryOnNetwork = true,
     retryOnTimeout = true,
     shouldRetry,
@@ -233,8 +234,13 @@ export function withRetry(options: RetryOptions = {}): Layer {
         }
 
         const method = initialConfig.method ?? 'GET';
+
+        // Маркер ставит withIdempotency. Если его нет, проверяем
+        // заголовок Idempotency-Key: приложение могло задать ключ
+        // вручную без подключения слоя.
         const hasIdempotencyKey =
-          getHeader(initialConfig.headers, idempotencyHeaderName) !== undefined;
+          initialConfig.idempotency !== undefined ||
+          getHeader(initialConfig.headers, DEFAULT_IDEMPOTENCY_HEADER) !== undefined;
 
         // Проверяем до первой попытки: предупреждение относится
         // к конфигурации, а не к факту повтора.
@@ -247,7 +253,7 @@ export function withRetry(options: RetryOptions = {}): Layer {
           warnUnsafeRetryOnce(
             `retry-unsafe:${method}:${rootSegment(initialConfig.path)}`,
             `[fetch-layer] Retry is enabled for ${method} ${initialConfig.path} ` +
-              `without the ${idempotencyHeaderName} header. On a network failure ` +
+              `without the ${DEFAULT_IDEMPOTENCY_HEADER} header. On a network failure ` +
               `the retry may create a duplicate. Add the header or disable retry ` +
               `with skipRetry.`,
           );

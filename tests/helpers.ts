@@ -176,12 +176,7 @@ export function createTestClient(options: TestClientOptions): Client {
     layers.push(withIdempotency(idempotency.source, { headerName: idempotency.headerName }));
   }
   if (retry) {
-    layers.push(
-      withRetry({
-        ...retry,
-        idempotencyHeaderName: retry.idempotencyHeaderName ?? idempotency?.headerName,
-      }),
-    );
+    layers.push(withRetry(retry));
   }
   if (auth) {
     layers.push(withAuth(auth));

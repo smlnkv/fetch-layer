@@ -180,6 +180,19 @@ export interface RequestConfig {
  */
 export interface ResolvedRequestConfig extends Omit<RequestConfig, 'headers'> {
   headers?: Record<string, string>;
+
+  /**
+   * Устанавливается withIdempotency. Свидетельствует, что к запросу
+   * применён ключ идемпотентности. withRetry читает маркер, чтобы
+   * решить, безопасен ли повтор мутирующего метода.
+   *
+   * Поле заполняется и когда withIdempotency сгенерировал ключ,
+   * и когда приложение задало его вручную. headerName хранится
+   * для отладки, withRetry на него не опирается.
+   *
+   * @internal
+   */
+  idempotency?: { headerName: string; key: string };
 }
 
 /**

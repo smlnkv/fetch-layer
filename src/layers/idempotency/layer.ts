@@ -10,10 +10,6 @@ export interface IdempotencyOptions {
   /**
    * Имя заголовка. По умолчанию Idempotency-Key. Некоторые серверы
    * используют другое имя, например X-Idempotency-Key.
-   *
-   * Если меняется имя, то необходимо указать его же в withRetry
-   * (опция idempotencyHeaderName): иначе предупреждение о
-   * небезопасном повторе не распознает заголовок.
    */
   headerName?: string;
 }
@@ -28,6 +24,11 @@ export interface IdempotencyOptions {
  *
  * Стоит снаружи retry-слоя: ключ генерируется один раз на всю
  * операцию, включая повторы, и resolve вызывается один раз.
+ *
+ * Помечает конфиг маркером idempotency, чтобы withRetry знал,
+ * что ключ применён, и не выдавал ложное предупреждение о
+ * небезопасном повторе. Маркер ставится и при сгенерированном
+ * ключе, и при заданном вручную.
  */
 export function withIdempotency(
   source: IdempotencySource,
@@ -52,7 +53,10 @@ export function withIdempotency(
         // Пустая строка и whitespace-only считаются "не установлено".
         const existingKey = getHeader(config.headers, headerName);
         if (existingKey !== undefined && existingKey.trim() !== '') {
-          return next<T>(config);
+          return next<T>({
+            ...config,
+            idempotency: { headerName, key: existingKey },
+          });
         }
 
         const context: IdempotencyContext = {
@@ -80,6 +84,7 @@ export function withIdempotency(
         const enriched: ResolvedRequestConfig = {
           ...config,
           headers: enrichedHeaders,
+          idempotency: { headerName, key },
         };
 
         try {
