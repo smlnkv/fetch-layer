@@ -757,13 +757,4 @@ describe('createClient - валидация', () => {
     );
     expect(() => createClient({ baseUrl: '/api', timeoutMs: 5000 })).not.toThrow();
   });
-
-  it('ошибка конфигурации, если layers не массив', () => {
-    expect(() =>
-      createClient({
-        baseUrl: '/api',
-        layers: 'not-array' as unknown as never,
-      }),
-    ).toThrow(/layers must be an array/);
-  });
 });

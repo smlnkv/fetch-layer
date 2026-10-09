@@ -137,10 +137,6 @@ function validateOptions(options: ClientOptions): void {
         'or use an environment with a global fetch (Node >= 20, modern browser).',
     );
   }
-
-  if (options.layers !== undefined && !Array.isArray(options.layers)) {
-    throw new Error('createClient: layers must be an array');
-  }
 }
 
 /**
