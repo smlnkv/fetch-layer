@@ -6,7 +6,8 @@
  * - fetch-layer/auth - провайдер сессии и resetRefreshCircuit;
  * - fetch-layer/idempotency - IdempotencySource и createSessionSource;
  * - fetch-layer/retry - только слой повторов;
- * - fetch-layer/storage - адаптеры хранилища.
+ * - fetch-layer/storage - адаптеры хранилища;
+ * - fetch-layer/error-body - встроенные парсеры тела ошибки.
  *
  * Внутренние модули (pipeline слоёв, утилиты, парсеры тела ошибки)
  * не входят в публичное API: приложение не может нарушить порядок
@@ -19,7 +20,7 @@ export { ApiError, toApiError, type ApiErrorKind } from './core/errors';
 
 export type { Layer, LayerContext } from './core/layer';
 
-export type { ErrorBodyFormat, ErrorBodyParser } from './core/error-body';
+export type { ErrorBodyParser, ParsedErrorBody } from './core/error-body';
 
 export { createMemoryStorage, fromWebStorage, type StorageLike } from './shared/storage';
 

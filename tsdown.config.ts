@@ -8,6 +8,7 @@ export default defineConfig({
     'src/layers/idempotency/index.ts',
     'src/layers/retry/index.ts',
     'src/shared/storage.ts',
+    'src/error-body.ts',
   ],
   format: ['esm'],
   target: 'es2022',

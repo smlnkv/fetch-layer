@@ -1,4 +1,4 @@
-import { buildErrorParser } from '../core/error-body';
+import { parseFlatErrorBody } from '../core/error-body';
 import { ApiError, classifyFetchError, toApiError } from '../core/errors';
 import { isStreamingBody } from '../shared/classify-body';
 import { setAbortTimeout, throwIfAborted } from '../shared/signals';
@@ -8,7 +8,7 @@ import { getHeader, mergeHeaders, setHeader } from './headers';
 import { parseRetryAfterMs } from './retry-after';
 import { buildUrl } from './url';
 
-import type { ErrorBodyFormat, ErrorBodyParser } from '../core/error-body';
+import type { ErrorBodyParser } from '../core/error-body';
 import type {
   QueryArrayFormat,
   QueryObjectFormat,
@@ -52,10 +52,23 @@ export interface TransportOptions {
   /** Формат объектов в query-параметрах. */
   queryObjectFormat?: QueryObjectFormat;
 
-  /** Встроенный формат тела ошибки. */
-  errorBodyFormat?: ErrorBodyFormat;
-
-  /** Кастомный парсер тела ошибки. Приоритет над errorBodyFormat. */
+  /**
+   * Кастомный парсер тела ошибки. По умолчанию используется
+   * плоский формат: { code, message, fields, requestId } или
+   * plain-text строка как message.
+   *
+   * Для встроенных форматов (content, error, rfc7807) подключите
+   * их из fetch-layer/error-body:
+   *
+   * ```ts
+   * import { errorBodyParsers } from 'fetch-layer/error-body';
+   *
+   * const client = createClient({
+   *   baseUrl: '/api',
+   *   parseErrorBody: errorBodyParsers.rfc7807,
+   * });
+   * ```
+   */
   parseErrorBody?: ErrorBodyParser;
 }
 
@@ -75,10 +88,7 @@ export function createBaseRequest(options: TransportOptions): RequestFn {
     queryObjectFormat: defaultObjectFormat = 'brackets',
   } = options;
 
-  const errorParser = buildErrorParser({
-    parseErrorBody: options.parseErrorBody,
-    errorBodyFormat: options.errorBodyFormat,
-  });
+  const errorParser = options.parseErrorBody ?? parseFlatErrorBody;
 
   return async function baseRequest<T>(config: ResolvedRequestConfig): Promise<T> {
     throwIfAborted(config.signal);

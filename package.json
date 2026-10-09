@@ -61,6 +61,10 @@
       "types": "./dist/shared/storage.d.mts",
       "import": "./dist/shared/storage.mjs"
     },
+    "./error-body": {
+      "types": "./dist/error-body.d.mts",
+      "import": "./dist/error-body.mjs"
+    },
     "./package.json": "./package.json"
   },
   "files": [
