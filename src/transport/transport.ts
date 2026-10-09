@@ -22,7 +22,7 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 
 /**
  * Подмножество полей ClientOptions для базового транспорта.
- * createClient передаёт сюда опции без слоёв и логгера.
+ * createClient передаёт сюда опции без слоёв и warn.
  *
  * @internal
  */
@@ -38,6 +38,13 @@ export interface TransportOptions {
 
   /** Режим отправки cookies. */
   credentials?: RequestCredentials;
+
+  /**
+   * Заголовки для всех запросов. Сливаются с per-request headers
+   * в самом низу pipeline: per-request и сгенерированные слоями
+   * заголовки переопределяют defaultHeaders.
+   */
+  defaultHeaders?: HeadersInit;
 
   /** Формат массивов в query-параметрах. */
   queryArrayFormat?: QueryArrayFormat;
@@ -63,6 +70,7 @@ export function createBaseRequest(options: TransportOptions): RequestFn {
     timeoutMs: defaultTimeoutMs = DEFAULT_TIMEOUT_MS,
     fetch: fetchImpl = globalThis.fetch,
     credentials: defaultCredentials,
+    defaultHeaders,
     queryArrayFormat: defaultArrayFormat = 'repeat',
     queryObjectFormat: defaultObjectFormat = 'brackets',
   } = options;
@@ -94,7 +102,11 @@ export function createBaseRequest(options: TransportOptions): RequestFn {
     const defaultAccept =
       responseType === 'json' ? 'application/json' : responseType === 'text' ? 'text/plain' : '*/*';
 
-    const headers = mergeHeaders({ Accept: defaultAccept }, config.headers);
+    // Порядок слияния: Accept -> defaultHeaders -> config.headers.
+    // Сгенерированные слоями заголовки (Idempotency-Key, Authorization)
+    // переопределяют defaultHeaders, поэтому случайный Idempotency-Key
+    // в defaultHeaders не сломает дедупликацию.
+    const headers = mergeHeaders({ Accept: defaultAccept }, defaultHeaders, config.headers);
 
     // prepareBody вне try: ошибка сериализации тела выбрасывается
     // до формирования финальных заголовков.

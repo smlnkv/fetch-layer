@@ -408,6 +408,36 @@ describe('client - заголовки', () => {
     expect(mock.calls[1]?.headers['x-from-pairs']).toBe('p');
     expect(mock.calls[1]?.headers['x-second']).toBe('s');
   });
+
+  it('defaultHeaders применяются ко всем запросам', async () => {
+    const mock = createMockFetch(() => ({ body: {} }));
+    const client = createTestClient({
+      fetch: mock.fetch,
+      defaultHeaders: { 'X-Client-Version': '1.0.0', 'X-Env': 'test' },
+    });
+
+    await client.get('/users');
+    expect(mock.calls[0]?.headers['x-client-version']).toBe('1.0.0');
+    expect(mock.calls[0]?.headers['x-env']).toBe('test');
+
+    await client.post('/orders', { total: 100 });
+    expect(mock.calls[1]?.headers['x-client-version']).toBe('1.0.0');
+    expect(mock.calls[1]?.headers['x-env']).toBe('test');
+  });
+
+  it('per-request заголовки переопределяют defaultHeaders', async () => {
+    const mock = createMockFetch(() => ({ body: {} }));
+    const client = createTestClient({
+      fetch: mock.fetch,
+      defaultHeaders: { 'X-Client-Version': '1.0.0' },
+    });
+
+    await client.get('/users', {
+      headers: { 'X-Client-Version': '2.0.0' },
+    });
+
+    expect(mock.calls[0]?.headers['x-client-version']).toBe('2.0.0');
+  });
 });
 
 describe('client - credentials', () => {
