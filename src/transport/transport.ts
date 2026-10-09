@@ -96,19 +96,12 @@ export function createBaseRequest(options: TransportOptions): RequestFn {
 
     const headers = mergeHeaders({ Accept: defaultAccept }, config.headers);
 
-    // prepareBody вне try: ошибка сериализации тела не должна
-    // получать finalConfig. Финальные заголовки к этому моменту
-    // ещё не сформированы, и onError по контракту видит конфиг
-    // после onRequest, без Accept и Content-Type. client.ts
-    // подставляет его через error.config ?? finalConfig.
+    // prepareBody вне try: ошибка сериализации тела выбрасывается
+    // до формирования финальных заголовков.
     const { body, contentType } = prepareBody(config.body);
     if (contentType !== undefined && getHeader(headers, 'Content-Type') === undefined) {
       setHeader(headers, 'Content-Type', contentType);
     }
-
-    // Финальные заголовки, с Accept и Content-Type. Тот же
-    // объект прикрепляется к ApiError, возникшей внутри try.
-    const finalConfig: ResolvedRequestConfig = { ...config, headers };
 
     const effectiveTimeoutMs = config.timeoutMs ?? defaultTimeoutMs;
     const timeout = setAbortTimeout(effectiveTimeoutMs);
@@ -198,14 +191,10 @@ export function createBaseRequest(options: TransportOptions): RequestFn {
 
       return data as T;
     } catch (e) {
-      // finalConfig прикрепляется ко всем ошибкам внутри блока:
-      // onError в client.ts увидит тот же конфиг, что и onBeforeSend.
-      // Для ошибок до try (сериализация тела, pre-abort) err.config
-      // остаётся undefined, и client.ts использует фолбэк на конфиг
-      // после onRequest.
-      const err = toApiError(e);
-      err.config = finalConfig;
-      throw err;
+      // Всё, что не ApiError, нормализуется здесь. Внутри try
+      // уже выбрасываются ApiError (http, parse, network, timeout,
+      // abort), поэтому toApiError идемпотентен.
+      throw toApiError(e);
     } finally {
       timeout.clear();
     }
