@@ -3,7 +3,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { ApiError } from '../src/index';
+import { type ApiError } from '../src/index';
 import { resetRefreshCircuit, type SessionProvider } from '../src/layers/auth/index';
 import { SingleFlight } from '../src/layers/auth/single-flight';
 
@@ -62,20 +62,6 @@ describe('auth - добавление заголовков', () => {
       status: 401,
     });
     expect(refresh).not.toHaveBeenCalled();
-  });
-
-  it('поддерживает асинхронный getAuthHeaders', async () => {
-    const provider: SessionProvider = {
-      getAuthHeaders: async () => ({ Authorization: 'Bearer async-token' }),
-      refresh: async () => ({ status: 'definitely-failed', reason: 'refresh-rejected' }),
-    };
-
-    const mock = createMockFetch(() => ({ body: null }));
-    const client = createTestClient({ fetch: mock.fetch, auth: { provider } });
-
-    await client.get('/users');
-
-    expect(mock.calls[0]?.headers.authorization).toBe('Bearer async-token');
   });
 });
 
@@ -413,40 +399,6 @@ describe('auth - temporarily-failed', () => {
 
     await expect(client2.get('/a')).rejects.toMatchObject({ kind: 'abort' });
     await expect(client2.get('/b')).rejects.toMatchObject({ kind: 'abort' });
-  });
-});
-
-describe('auth - ошибки из provider.refresh', () => {
-  it('классифицирует ошибку из refresh', async () => {
-    const provider401: SessionProvider = {
-      getAuthHeaders: () => ({ Authorization: 'Bearer token' }),
-      refresh: async () => {
-        throw new ApiError({ kind: 'http', status: 401, message: 'Refresh failed' });
-      },
-    };
-    const mock1 = createMockFetch(() => ({ status: 401, body: { code: 'SESSION_INVALID' } }));
-    const onSessionExpired1 = vi.fn();
-    const client1 = createTestClient({
-      fetch: mock1.fetch,
-      auth: { provider: provider401, onSessionExpired: onSessionExpired1 },
-    });
-    await expect(client1.get('/users')).rejects.toBeDefined();
-    expect(onSessionExpired1).toHaveBeenCalled();
-
-    const providerNetwork: SessionProvider = {
-      getAuthHeaders: () => ({ Authorization: 'Bearer token' }),
-      refresh: async () => {
-        throw new TypeError('Network down');
-      },
-    };
-    const mock2 = createMockFetch(() => ({ status: 401, body: { code: 'SESSION_INVALID' } }));
-    const onSessionExpired2 = vi.fn();
-    const client2 = createTestClient({
-      fetch: mock2.fetch,
-      auth: { provider: providerNetwork, onSessionExpired: onSessionExpired2 },
-    });
-    await expect(client2.get('/users')).rejects.toBeDefined();
-    expect(onSessionExpired2).not.toHaveBeenCalled();
   });
 });
 

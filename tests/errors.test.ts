@@ -57,8 +57,8 @@ describe('ApiError - конструктор', () => {
   });
 });
 
-describe('ApiError - isNetwork и isCancelled', () => {
-  it('корректно классифицируют kind', () => {
+describe('ApiError - геттеры', () => {
+  it('isNetwork и isCancelled', () => {
     expect(new ApiError({ kind: 'network', message: 'x' }).isNetwork).toBe(true);
     expect(new ApiError({ kind: 'timeout', message: 'x' }).isNetwork).toBe(true);
     expect(new ApiError({ kind: 'http', status: 500, message: 'x' }).isNetwork).toBe(false);
@@ -66,10 +66,8 @@ describe('ApiError - isNetwork и isCancelled', () => {
     expect(new ApiError({ kind: 'abort', message: 'x' }).isCancelled).toBe(true);
     expect(new ApiError({ kind: 'network', message: 'x' }).isCancelled).toBe(false);
   });
-});
 
-describe('ApiError - isAuthError', () => {
-  it('true для auth-кодов, 401, 403; пересекается с isClientError', () => {
+  it('isAuthError: true для auth-кодов, 401, 403; пересекается с isClientError', () => {
     for (const code of ['AUTH_PROVIDER_ERROR', 'REFRESH_TIMEOUT', 'REFRESH_CIRCUIT_OPEN']) {
       expect(new ApiError({ kind: 'unknown', code, message: 'x' }).isAuthError).toBe(true);
     }
@@ -85,10 +83,8 @@ describe('ApiError - isAuthError', () => {
     expect(err401.isAuthError).toBe(true);
     expect(err401.isClientError).toBe(true);
   });
-});
 
-describe('ApiError - isRetryable', () => {
-  it('true для network, timeout, 408, 429 и 5xx', () => {
+  it('isRetryable: true для network, timeout, 408, 429 и 5xx', () => {
     expect(new ApiError({ kind: 'network', message: 'x' }).isRetryable).toBe(true);
     expect(new ApiError({ kind: 'timeout', message: 'x' }).isRetryable).toBe(true);
 
@@ -101,7 +97,7 @@ describe('ApiError - isRetryable', () => {
     }
   });
 
-  it('false для abort, auth-кодов, остальных 4xx и 2xx/3xx', () => {
+  it('isRetryable: false для abort, auth-кодов, остальных 4xx и 2xx/3xx', () => {
     expect(new ApiError({ kind: 'abort', message: 'x' }).isRetryable).toBe(false);
     expect(new ApiError({ kind: 'serialize', message: 'x' }).isRetryable).toBe(false);
     expect(new ApiError({ kind: 'storage', message: 'x' }).isRetryable).toBe(false);
@@ -121,10 +117,8 @@ describe('ApiError - isRetryable', () => {
     expect(new ApiError({ kind: 'http', status: 200, message: 'x' }).isRetryable).toBe(false);
     expect(new ApiError({ kind: 'http', status: 304, message: 'x' }).isRetryable).toBe(false);
   });
-});
 
-describe('ApiError - isClientError, isServerError, isConflict', () => {
-  it('корректно классифицирует статусы', () => {
+  it('isClientError, isServerError, isConflict', () => {
     expect(new ApiError({ kind: 'http', status: 400, message: 'x' }).isClientError).toBe(true);
     expect(new ApiError({ kind: 'http', status: 499, message: 'x' }).isClientError).toBe(true);
     expect(new ApiError({ kind: 'http', status: 500, message: 'x' }).isClientError).toBe(false);
@@ -177,26 +171,22 @@ describe('toApiError', () => {
     expect(toApiError(duck).isUncertain).toBe(false);
   });
 
-  it('преобразует TypeError и Error с message в unknown', () => {
-    const typeErr = toApiError(new TypeError('undefined is not a function'));
-    expect(typeErr.kind).toBe('unknown');
-    expect(typeErr.message).toBe('undefined is not a function');
+  it('преобразует TypeError, Error, неизвестные значения и name = "SomeError" в unknown', () => {
+    expect(toApiError(new TypeError('undefined is not a function')).kind).toBe('unknown');
 
-    const genericErr = toApiError(new Error('Something went wrong'));
-    expect(genericErr.kind).toBe('unknown');
-    expect(genericErr.message).toBe('Something went wrong');
-    expect(genericErr.cause).toBeInstanceOf(Error);
-  });
+    const generic = toApiError(new Error('Something went wrong'));
+    expect(generic.kind).toBe('unknown');
+    expect(generic.message).toBe('Something went wrong');
+    expect(generic.cause).toBeInstanceOf(Error);
 
-  it('преобразует неизвестное значение в unknown', () => {
     expect(toApiError('just a string').kind).toBe('unknown');
     expect(toApiError('just a string').message).toBe('Unknown error');
     expect(toApiError(null).kind).toBe('unknown');
-  });
 
-  it('не путает обычный Error с полем name = "SomeError"', () => {
-    const err = new Error('x');
-    err.name = 'SomeError';
-    expect(toApiError(err).kind).toBe('unknown');
+    // Обычный Error с нестандартным name не должен попасть в ветки
+    // AbortError / TimeoutError / SyntaxError.
+    const named = new Error('x');
+    named.name = 'SomeError';
+    expect(toApiError(named).kind).toBe('unknown');
   });
 });

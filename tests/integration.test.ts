@@ -88,7 +88,7 @@ describe('integration - полный pipeline', () => {
 });
 
 describe('integration - параллельные запросы', () => {
-  it('параллельные 401 + параллельные POST - single-flight и ключи не конфликтуют', async () => {
+  it('single-flight: параллельные 401 запускают один refresh; ключи не конфликтуют', async () => {
     let refreshCount = 0;
     let token = 'old';
     const keys: string[] = [];
@@ -120,9 +120,11 @@ describe('integration - параллельные запросы', () => {
           },
         },
       },
+      retry: { maxAttempts: 3, sleep: () => Promise.resolve() },
       idempotency: { source },
     });
 
+    // Разные тела - разные ключи.
     await Promise.all([
       client.post('/orders', { n: 1 }),
       client.post('/orders', { n: 2 }),
@@ -132,27 +134,22 @@ describe('integration - параллельные запросы', () => {
     expect(refreshCount).toBe(1);
     expect(keys).toHaveLength(3);
     expect(new Set(keys).size).toBe(3);
-  });
 
-  it('idempotency + retry + auth - одинаковые тела, один ключ, один refresh', async () => {
-    let refreshCount = 0;
-    let token = 'old';
+    // Одинаковые тела - один ключ на все параллельные запросы.
+    refreshCount = 0;
+    token = 'old';
+    const sameKeys: string[] = [];
 
-    const allKeys: string[] = [];
-
-    const mock = createMockFetch((_, __, headers) => {
+    const mockSame = createMockFetch((_, __, headers) => {
       if (headers.authorization === 'Bearer old') {
         return { status: 401, body: { code: 'SESSION_INVALID' } };
       }
-
-      allKeys.push(headers['idempotency-key'] ?? '');
+      sameKeys.push(headers['idempotency-key'] ?? '');
       return { body: { ok: true } };
     });
 
-    const source = createSessionSource({ storage: createMemoryStorage() });
-
-    const client = createTestClient({
-      fetch: mock.fetch,
+    const clientSame = createTestClient({
+      fetch: mockSame.fetch,
       auth: {
         provider: {
           getAuthHeaders: () => ({ Authorization: `Bearer ${token}` }),
@@ -168,29 +165,30 @@ describe('integration - параллельные запросы', () => {
         },
       },
       retry: { maxAttempts: 3, sleep: () => Promise.resolve() },
-      idempotency: { source },
+      idempotency: { source: createSessionSource({ storage: createMemoryStorage() }) },
     });
 
     await Promise.all([
-      client.post('/orders', { total: 100 }),
-      client.post('/orders', { total: 100 }),
-      client.post('/orders', { total: 100 }),
+      clientSame.post('/orders', { total: 100 }),
+      clientSame.post('/orders', { total: 100 }),
+      clientSame.post('/orders', { total: 100 }),
     ]);
 
     expect(refreshCount).toBe(1);
-    expect(allKeys).toHaveLength(3);
-    expect(new Set(allKeys).size).toBe(1);
+    expect(sameKeys).toHaveLength(3);
+    expect(new Set(sameKeys).size).toBe(1);
   });
 });
 
 describe('integration - circuit breaker + retry', () => {
-  it('после исчерпания retry при 401 auth открывает circuit', async () => {
+  it('открытый circuit не повторяется retry-слоем', async () => {
+    let attempts = 0;
     let refreshCalls = 0;
 
-    const mock = createMockFetch(() => ({
-      status: 401,
-      body: { code: 'SESSION_INVALID' },
-    }));
+    const mock = createMockFetch(() => {
+      attempts++;
+      return { status: 401, body: { code: 'SESSION_INVALID' } };
+    });
 
     const client = createTestClient({
       fetch: mock.fetch,
@@ -207,48 +205,20 @@ describe('integration - circuit breaker + retry', () => {
         },
         circuitBreakerMs: 60_000,
       },
-      retry: { maxAttempts: 1, sleep: () => Promise.resolve() },
-    });
-
-    await expect(client.get('/users')).rejects.toBeDefined();
-    expect(refreshCalls).toBe(1);
-
-    await expect(client.get('/other')).rejects.toMatchObject({
-      code: 'REFRESH_CIRCUIT_OPEN',
-    });
-    expect(refreshCalls).toBe(1);
-  });
-
-  it('retry не повторяет REFRESH_CIRCUIT_OPEN', async () => {
-    let attempts = 0;
-
-    const mock = createMockFetch(() => {
-      attempts++;
-      return { status: 401, body: { code: 'SESSION_INVALID' } };
-    });
-
-    const client = createTestClient({
-      fetch: mock.fetch,
-      auth: {
-        provider: {
-          getAuthHeaders: () => ({ Authorization: 'Bearer token' }),
-          refresh: async () => ({
-            status: 'temporarily-failed',
-            error: new TypeError('Network down'),
-          }),
-        },
-        circuitBreakerMs: 60_000,
-      },
       retry: { maxAttempts: 3, sleep: () => Promise.resolve() },
     });
 
+    // Первый запрос: 401 -> refresh (temporarily-failed) -> circuit открыт.
     await expect(client.get('/a')).rejects.toBeDefined();
+    expect(refreshCalls).toBe(1);
     const attemptsAfterFirst = attempts;
 
+    // Второй запрос: circuit открыт, refresh не вызывается.
+    // REFRESH_CIRCUIT_OPEN не retryable: попыток больше не будет.
     await expect(client.get('/b')).rejects.toMatchObject({
       code: 'REFRESH_CIRCUIT_OPEN',
     });
-
+    expect(refreshCalls).toBe(1);
     expect(attempts).toBe(attemptsAfterFirst + 1);
   });
 });

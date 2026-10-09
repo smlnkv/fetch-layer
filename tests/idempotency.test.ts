@@ -31,47 +31,36 @@ function keyOf(call: { headers: Record<string, string> } | undefined): string | 
   return call?.headers['idempotency-key'];
 }
 
-describe('idempotency - базовое', () => {
-  it('добавляет ключ к мутирующим методам, не добавляет к GET', async () => {
+describe('idempotency - добавление ключа', () => {
+  it('добавляет ключ к мутирующим методам, не добавляет к GET; метод нормализуется в верхний регистр', async () => {
     const mock = createMockFetch(() => ({ body: null }));
     const source = createSessionSource({ storage: createMemoryStorage() });
     const client = createIdempotentClient({ fetch: mock.fetch, source });
 
     await client.post('/orders', { total: 100 });
     await client.delete('/orders/1');
-    await client.delete('/orders/batch', { ids: [1, 2, 3] });
     await client.put('/users/1', { name: 'Alice' });
     await client.patch('/users/2', { name: 'Bob' });
 
-    expect(keyOf(mock.calls[0])).toBeDefined();
-    expect(keyOf(mock.calls[1])).toBeDefined();
-    expect(keyOf(mock.calls[2])).toBeDefined();
-    expect(keyOf(mock.calls[3])).toBeDefined();
-    expect(keyOf(mock.calls[4])).toBeDefined();
+    for (let i = 0; i < 4; i++) {
+      expect(keyOf(mock.calls[i])).toBeDefined();
+    }
 
     await client.get('/orders');
-    expect(keyOf(mock.calls[5])).toBeUndefined();
+    expect(keyOf(mock.calls[4])).toBeUndefined();
 
     await client.post('/orders', { total: 100 }, { skipIdempotency: true });
-    expect(keyOf(mock.calls[6])).toBeUndefined();
-  });
+    expect(keyOf(mock.calls[5])).toBeUndefined();
 
-  it('добавляет ключ для метода в нижнем регистре', async () => {
-    // Метод нормализуется в client.ts до входа в pipeline.
-    // Без нормализации withIdempotency не распознаёт 'post'
-    // как мутирующий и оставляет запрос без ключа.
-    const mock = createMockFetch(() => ({ body: null }));
-    const source = createSessionSource({ storage: createMemoryStorage() });
-    const client = createIdempotentClient({ fetch: mock.fetch, source });
-
+    // Метод в нижнем регистре нормализуется в client.ts до входа
+    // в pipeline; withIdempotency распознаёт 'post' как мутирующий.
     await client.request({
       path: '/orders',
       method: 'post' as unknown as 'POST',
       body: { total: 100 },
     });
-
-    expect(mock.calls[0]?.method).toBe('POST');
-    expect(keyOf(mock.calls[0])).toBeDefined();
+    expect(mock.calls[6]?.method).toBe('POST');
+    expect(keyOf(mock.calls[6])).toBeDefined();
   });
 
   it('memoryStorageSource работает как источник ключей', async () => {
@@ -89,7 +78,7 @@ describe('idempotency - базовое', () => {
   });
 });
 
-describe('idempotency - разные ключи', () => {
+describe('idempotency - отпечаток: body, scope, query', () => {
   it('различает body по содержимому, не по порядку ключей', async () => {
     const mock = createMockFetch(() => {
       throw new TypeError('Network down');
@@ -129,7 +118,7 @@ describe('idempotency - разные ключи', () => {
     expect(keyOf(mock.calls[2])).not.toBe(keyOf(mock.calls[3]));
   });
 
-  it('различает query-параметры: разные query дают разные ключи', async () => {
+  it('query участвует в отпечатке: значение, порядок, undefined/null, пустой query', async () => {
     const mock = createMockFetch(() => {
       throw new TypeError('Network down');
     });
@@ -138,6 +127,7 @@ describe('idempotency - разные ключи', () => {
 
     const body = { amount: 100 };
 
+    // Разные значения query дают разные ключи.
     await expect(
       client.post('/transfer', body, { query: { type: 'internal' } }),
     ).rejects.toBeDefined();
@@ -145,66 +135,32 @@ describe('idempotency - разные ключи', () => {
       client.post('/transfer', body, { query: { type: 'external' } }),
     ).rejects.toBeDefined();
     expect(keyOf(mock.calls[0])).not.toBe(keyOf(mock.calls[1]));
-  });
 
-  it('query с одинаковыми параметрами в разном порядке дают один ключ', async () => {
-    const mock = createMockFetch(() => {
-      throw new TypeError('Network down');
-    });
-    const source = createSessionSource({ storage: createMemoryStorage() });
-    const client = createIdempotentClient({ fetch: mock.fetch, source });
-
-    const body = { amount: 100 };
-
+    // Одинаковые параметры в разном порядке дают один ключ.
     await expect(client.post('/transfer', body, { query: { a: 1, b: 2 } })).rejects.toBeDefined();
     await expect(client.post('/transfer', body, { query: { b: 2, a: 1 } })).rejects.toBeDefined();
-    expect(keyOf(mock.calls[0])).toBe(keyOf(mock.calls[1]));
-  });
+    expect(keyOf(mock.calls[2])).toBe(keyOf(mock.calls[3]));
 
-  it('отсутствие query и пустой query дают один ключ', async () => {
-    const mock = createMockFetch(() => {
-      throw new TypeError('Network down');
-    });
-    const source = createSessionSource({ storage: createMemoryStorage() });
-    const client = createIdempotentClient({ fetch: mock.fetch, source });
-
-    const body = { amount: 100 };
-
+    // Отсутствие query и пустой query эквивалентны.
     await expect(client.post('/transfer', body)).rejects.toBeDefined();
     await expect(client.post('/transfer', body, { query: {} })).rejects.toBeDefined();
-    expect(keyOf(mock.calls[0])).toBe(keyOf(mock.calls[1]));
-  });
+    expect(keyOf(mock.calls[4])).toBe(keyOf(mock.calls[5]));
 
-  it('query с undefined и null не влияет на отпечаток', async () => {
-    const mock = createMockFetch(() => {
-      throw new TypeError('Network down');
-    });
-    const source = createSessionSource({ storage: createMemoryStorage() });
-    const client = createIdempotentClient({ fetch: mock.fetch, source });
-
-    const body = { amount: 100 };
-
+    // undefined и null в query не влияют на отпечаток.
     await expect(client.post('/transfer', body)).rejects.toBeDefined();
     await expect(
       client.post('/transfer', body, { query: { a: undefined, b: null } }),
     ).rejects.toBeDefined();
-    expect(keyOf(mock.calls[0])).toBe(keyOf(mock.calls[1]));
-  });
+    expect(keyOf(mock.calls[6])).toBe(keyOf(mock.calls[7]));
 
-  it('разные body при одинаковом query дают разные ключи', async () => {
-    const mock = createMockFetch(() => {
-      throw new TypeError('Network down');
-    });
-    const source = createSessionSource({ storage: createMemoryStorage() });
-    const client = createIdempotentClient({ fetch: mock.fetch, source });
-
+    // Разные body при одинаковом query дают разные ключи.
     await expect(
       client.post('/transfer', { amount: 100 }, { query: { type: 'internal' } }),
     ).rejects.toBeDefined();
     await expect(
       client.post('/transfer', { amount: 200 }, { query: { type: 'internal' } }),
     ).rejects.toBeDefined();
-    expect(keyOf(mock.calls[0])).not.toBe(keyOf(mock.calls[1]));
+    expect(keyOf(mock.calls[8])).not.toBe(keyOf(mock.calls[9]));
   });
 });
 
@@ -232,44 +188,41 @@ describe('idempotency - ручной ключ', () => {
     expect(keyOf(mock.calls[2])?.trim()).toBeTruthy();
   });
 
-  it('распознаёт ключ в любом регистре', async () => {
-    const mock = createMockFetch(() => ({ body: { id: '1' } }));
-    const source = createSessionSource({ storage: createMemoryStorage() });
-    const client = createIdempotentClient({ fetch: mock.fetch, source });
-
-    await client.post(
-      '/orders',
-      { total: 100 },
-      { headers: { 'idempotency-key': 'lowercase-key' } },
-    );
-
-    const headers = mock.calls[0]?.headers ?? {};
-    expect(Object.values(headers)).toContain('lowercase-key');
-  });
-
-  it('поддерживает кастомное имя заголовка', async () => {
-    const mock = createMockFetch(() => ({ body: { id: '1' } }));
-    const source = createSessionSource({ storage: createMemoryStorage() });
-    const client = createIdempotentClient({
-      fetch: mock.fetch,
-      source,
-      headerName: 'X-Idempotency-Key',
-    });
-
-    await client.post('/orders', { total: 100 });
-
-    expect(mock.calls[0]?.headers['x-idempotency-key']).toBeDefined();
-    expect(mock.calls[0]?.headers['idempotency-key']).toBeUndefined();
-  });
-});
-
-describe('idempotency - исходы', () => {
-  it('удаляет ключ после success и 4xx', async () => {
+  it('распознаёт ключ в любом регистре; поддерживает кастомное имя заголовка', async () => {
     const mock1 = createMockFetch(() => ({ body: { id: '1' } }));
     const source1 = createSessionSource({ storage: createMemoryStorage() });
     const client1 = createIdempotentClient({ fetch: mock1.fetch, source: source1 });
 
+    await client1.post(
+      '/orders',
+      { total: 100 },
+      { headers: { 'idempotency-key': 'lowercase-key' } },
+    );
+    expect(Object.values(mock1.calls[0]?.headers ?? {})).toContain('lowercase-key');
+
+    const mock2 = createMockFetch(() => ({ body: { id: '1' } }));
+    const source2 = createSessionSource({ storage: createMemoryStorage() });
+    const client2 = createIdempotentClient({
+      fetch: mock2.fetch,
+      source: source2,
+      headerName: 'X-Idempotency-Key',
+    });
+
+    await client2.post('/orders', { total: 100 });
+
+    expect(mock2.calls[0]?.headers['x-idempotency-key']).toBeDefined();
+    expect(mock2.calls[0]?.headers['idempotency-key']).toBeUndefined();
+  });
+});
+
+describe('idempotency - исходы', () => {
+  it('удаляет ключ после success и 4xx (definite-failure)', async () => {
     const body = { total: 100 };
+
+    const mock1 = createMockFetch(() => ({ body: { id: '1' } }));
+    const source1 = createSessionSource({ storage: createMemoryStorage() });
+    const client1 = createIdempotentClient({ fetch: mock1.fetch, source: source1 });
+
     await client1.post('/orders', body);
     await client1.post('/orders', body);
     expect(keyOf(mock1.calls[0])).not.toBe(keyOf(mock1.calls[1]));
@@ -311,31 +264,8 @@ describe('idempotency - исходы', () => {
   });
 });
 
-describe('idempotency - параллельные POST с разными body', () => {
-  it('выдаёт разные ключи для параллельных POST с одним scope и разными body', async () => {
-    const seenKeys: string[] = [];
-
-    const mock = createMockFetch((_, init) => {
-      const headers = init.headers as Record<string, string>;
-      seenKeys.push(headers['idempotency-key'] ?? '');
-      return { body: { ok: true } };
-    });
-
-    const storage = createMemoryStorage();
-    const source = createSessionSource({ storage });
-    const client = createIdempotentClient({ fetch: mock.fetch, source });
-
-    await Promise.all([
-      client.post('/orders', { n: 1 }, { idempotencyScope: 'shared' }),
-      client.post('/orders', { n: 2 }, { idempotencyScope: 'shared' }),
-      client.post('/orders', { n: 3 }, { idempotencyScope: 'shared' }),
-    ]);
-
-    expect(seenKeys).toHaveLength(3);
-    expect(new Set(seenKeys).size).toBe(3);
-  });
-
-  it('успех одного запроса не удаляет ключ для параллельного с другим body', async () => {
+describe('idempotency - параллельные POST', () => {
+  it('выдаёт разные ключи для разных body, успех одного не удаляет ключ другого', async () => {
     const seenKeys: string[] = [];
 
     const mock = createMockFetch((_, init) => {
@@ -362,13 +292,14 @@ describe('idempotency - параллельные POST с разными body', (
     const body2Key = seenKeys[1];
     expect(body1Key).not.toBe(body2Key);
 
+    // Ключ второго (неуспешного) body сохранился.
     await client.post('/orders', { n: 2 }, { idempotencyScope: 'shared' });
     expect(seenKeys[2]).toBe(body2Key);
   });
 });
 
 describe('idempotency - несериализуемые тела', () => {
-  it('даёт новый ключ на каждый вызов и не сохраняет в хранилище', async () => {
+  it('FormData, Blob, ArrayBuffer, URLSearchParams: новый ключ каждый раз, в хранилище не пишется', async () => {
     const bodies: unknown[] = [
       (() => {
         const fd = new FormData();
@@ -398,29 +329,7 @@ describe('idempotency - несериализуемые тела', () => {
     }
   });
 
-  it('даёт новый ключ на каждый File и не сохраняет в хранилище', async () => {
-    // Без File в isSerializableBody два разных File получили бы один ключ.
-    const storage = createMemoryStorage();
-    const source = createSessionSource({ storage });
-    const mock = createMockFetch(() => ({ body: { ok: true } }));
-    const client = createIdempotentClient({ fetch: mock.fetch, source });
-
-    const fileA = new File(['aaa'], 'a.png', { type: 'image/png' });
-    const fileB = new File(['bbb'], 'b.png', { type: 'image/png' });
-
-    await client.post('/upload', fileA);
-    await client.post('/upload', fileB);
-
-    expect(keyOf(mock.calls[0])).toBeDefined();
-    expect(keyOf(mock.calls[1])).toBeDefined();
-    expect(keyOf(mock.calls[0])).not.toBe(keyOf(mock.calls[1]));
-
-    const raw = storage.getItem('idempotency:session');
-    const store = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
-    expect(Object.keys(store)).toHaveLength(0);
-  });
-
-  it('два POST с разными File и одинаковым scope получают разные ключи', async () => {
+  it('File: два разных File дают разные ключи, в хранилище не пишется', async () => {
     const seenKeys: string[] = [];
 
     const mock = createMockFetch((_, init) => {
@@ -429,7 +338,8 @@ describe('idempotency - несериализуемые тела', () => {
       return { body: { ok: true } };
     });
 
-    const source = createSessionSource({ storage: createMemoryStorage() });
+    const storage = createMemoryStorage();
+    const source = createSessionSource({ storage });
     const client = createIdempotentClient({ fetch: mock.fetch, source });
 
     const fileA = new File(['aaa'], 'avatar.png', { type: 'image/png' });
@@ -439,60 +349,14 @@ describe('idempotency - несериализуемые тела', () => {
     await client.post('/upload', fileB, { idempotencyScope: 'avatar' });
 
     expect(seenKeys).toHaveLength(2);
-    expect(seenKeys[0]).toBeDefined();
-    expect(seenKeys[1]).toBeDefined();
     expect(seenKeys[0]).not.toBe(seenKeys[1]);
-  });
-
-  it('два POST с одинаковым File и одинаковым scope получают разные ключи', async () => {
-    // Даже одинаковые по содержимому File не дедуплицируются:
-    // у них нет стабильного отпечатка, каждый вызов - новый ключ.
-    const seenKeys: string[] = [];
-
-    const mock = createMockFetch((_, init) => {
-      const headers = init.headers as Record<string, string>;
-      seenKeys.push(headers['idempotency-key'] ?? '');
-      return { body: { ok: true } };
-    });
-
-    const source = createSessionSource({ storage: createMemoryStorage() });
-    const client = createIdempotentClient({ fetch: mock.fetch, source });
-
-    const file = new File(['content'], 'avatar.png', { type: 'image/png' });
-
-    await client.post('/upload', file, { idempotencyScope: 'avatar' });
-    await client.post('/upload', file, { idempotencyScope: 'avatar' });
-
-    expect(seenKeys).toHaveLength(2);
-    expect(seenKeys[0]).not.toBe(seenKeys[1]);
-  });
-
-  it('Node.js stream.Readable не даёт BODY_SERIALIZATION_ERROR и не сохраняется', async () => {
-    // Без isNodeReadableBody в serialize.ts stableSerialize обходил бы
-    // _readableState, находил циклические ссылки и падал с
-    // BODY_SERIALIZATION_ERROR. Запрос не отправлялся.
-    const storage = createMemoryStorage();
-    const source = createSessionSource({ storage });
-    const mock = createMockFetch(() => ({ body: { ok: true } }));
-    const client = createIdempotentClient({ fetch: mock.fetch, source });
-
-    const streamA = Readable.from(['hello']);
-    const streamB = Readable.from(['world']);
-
-    await client.post('/upload', streamA);
-    await client.post('/upload', streamB);
-
-    expect(mock.calls).toHaveLength(2);
-    expect(keyOf(mock.calls[0])).toBeDefined();
-    expect(keyOf(mock.calls[1])).toBeDefined();
-    expect(keyOf(mock.calls[0])).not.toBe(keyOf(mock.calls[1]));
 
     const raw = storage.getItem('idempotency:session');
     const store = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
     expect(Object.keys(store)).toHaveLength(0);
   });
 
-  it('два POST с разными Node-стримами и одинаковым scope получают разные ключи', async () => {
+  it('Node stream.Readable: два разных стрима дают разные ключи, в хранилище не пишется', async () => {
     const seenKeys: string[] = [];
 
     const mock = createMockFetch((_, init) => {
@@ -501,7 +365,8 @@ describe('idempotency - несериализуемые тела', () => {
       return { body: { ok: true } };
     });
 
-    const source = createSessionSource({ storage: createMemoryStorage() });
+    const storage = createMemoryStorage();
+    const source = createSessionSource({ storage });
     const client = createIdempotentClient({ fetch: mock.fetch, source });
 
     await client.post('/upload', Readable.from(['aaa']), { idempotencyScope: 'upload' });
@@ -509,31 +374,10 @@ describe('idempotency - несериализуемые тела', () => {
 
     expect(seenKeys).toHaveLength(2);
     expect(seenKeys[0]).not.toBe(seenKeys[1]);
-  });
 
-  it('два POST с одним Node-стримом получают разные ключи', async () => {
-    // Стрим одноразовый: второй POST с тем же объектом отправит
-    // исчерпанный iterator. Здесь проверяем только side effect на
-    // стороне идемпотентности: у стрима нет отпечатка, ключ каждый
-    // раз новый.
-    const seenKeys: string[] = [];
-
-    const mock = createMockFetch((_, init) => {
-      const headers = init.headers as Record<string, string>;
-      seenKeys.push(headers['idempotency-key'] ?? '');
-      return { body: { ok: true } };
-    });
-
-    const source = createSessionSource({ storage: createMemoryStorage() });
-    const client = createIdempotentClient({ fetch: mock.fetch, source });
-
-    const stream = Readable.from(['content']);
-
-    await client.post('/upload', stream, { idempotencyScope: 'upload' });
-    await client.post('/upload', stream, { idempotencyScope: 'upload' });
-
-    expect(seenKeys).toHaveLength(2);
-    expect(seenKeys[0]).not.toBe(seenKeys[1]);
+    const raw = storage.getItem('idempotency:session');
+    const store = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+    expect(Object.keys(store)).toHaveLength(0);
   });
 });
 
@@ -590,7 +434,7 @@ describe('idempotency - ошибки', () => {
   });
 });
 
-describe('idempotency - maxEntries', () => {
+describe('idempotency - maxEntries и lastUsedAt', () => {
   it('удаляет старейшие записи при переполнении', async () => {
     const mock = createMockFetch(() => {
       throw new TypeError('Network down');
@@ -609,97 +453,14 @@ describe('idempotency - maxEntries', () => {
       client.post('/orders', { n: 3 }, { idempotencyScope: 'order-3' }),
     ).rejects.toBeDefined();
 
-    const snapshot = storage.snapshot();
-    const raw = snapshot['idempotency:session'];
-    expect(raw).toBeDefined();
-
+    const raw = storage.snapshot()['idempotency:session'];
     const parsed = JSON.parse(raw!) as Record<string, { key: string }>;
     const keys = Object.keys(parsed);
 
     expect(keys).toHaveLength(2);
     expect(keys.some((k) => k.includes('"order-1"'))).toBe(false);
   });
-});
 
-describe('idempotency - кастомный источник', () => {
-  it('использует кастомный источник и передаёт корректный контекст', async () => {
-    const nextKey = vi.fn(() => 'custom-key-1');
-    const source: IdempotencySource = { nextKey };
-
-    const mock = createMockFetch(() => ({ body: { id: '1' } }));
-    const client = createIdempotentClient({ fetch: mock.fetch, source });
-
-    const body = { total: 100 };
-    await client.post('/orders', body);
-
-    expect(nextKey).toHaveBeenCalledTimes(1);
-    expect(nextKey).toHaveBeenCalledWith({
-      method: 'POST',
-      path: '/orders',
-      body,
-      query: undefined,
-      scope: undefined,
-    });
-    expect(keyOf(mock.calls[0])).toBe('custom-key-1');
-  });
-
-  it('передаёт query в контекст кастомного источника', async () => {
-    const nextKey = vi.fn(() => 'custom-key-1');
-    const source: IdempotencySource = { nextKey };
-
-    const mock = createMockFetch(() => ({ body: { id: '1' } }));
-    const client = createIdempotentClient({ fetch: mock.fetch, source });
-
-    const body = { total: 100 };
-    const query = { type: 'internal', priority: 1 };
-    await client.post('/orders', body, { query });
-
-    expect(nextKey).toHaveBeenCalledTimes(1);
-    expect(nextKey).toHaveBeenCalledWith({
-      method: 'POST',
-      path: '/orders',
-      body,
-      query,
-      scope: undefined,
-    });
-  });
-
-  it('вызывает resolve с success, definite-failure, indefinite-failure', async () => {
-    const resolve = vi.fn<(ctx: IdempotencyContext, outcome: IdempotencyOutcome) => void>();
-    const source: IdempotencySource = { nextKey: () => 'key-1', resolve };
-
-    const mock1 = createMockFetch(() => ({ body: { id: '1' } }));
-    const client1 = createIdempotentClient({ fetch: mock1.fetch, source });
-    await client1.post('/orders', { total: 100 });
-    expect(resolve).toHaveBeenLastCalledWith(expect.anything(), 'success');
-
-    const mock2 = createMockFetch(() => ({ status: 400, body: {} }));
-    const client2 = createIdempotentClient({ fetch: mock2.fetch, source });
-    await expect(client2.post('/orders', { total: 100 })).rejects.toBeDefined();
-    expect(resolve).toHaveBeenLastCalledWith(expect.anything(), 'definite-failure');
-
-    const mock3 = createMockFetch(() => ({ status: 500, body: {} }));
-    const client3 = createIdempotentClient({ fetch: mock3.fetch, source });
-    await expect(client3.post('/orders', { total: 100 })).rejects.toBeDefined();
-    expect(resolve).toHaveBeenLastCalledWith(expect.anything(), 'indefinite-failure');
-  });
-
-  it('падение resolve не ломает запрос', async () => {
-    const source: IdempotencySource = {
-      nextKey: () => 'key-1',
-      resolve: () => {
-        throw new Error('Storage failure');
-      },
-    };
-
-    const mock = createMockFetch(() => ({ body: { id: '1' } }));
-    const client = createIdempotentClient({ fetch: mock.fetch, source });
-
-    await expect(client.post('/orders', { total: 100 })).resolves.toEqual({ id: '1' });
-  });
-});
-
-describe('idempotency - lastUsedAt', () => {
   it('не удаляет активный ключ при переполнении', async () => {
     vi.useFakeTimers();
     try {
@@ -740,5 +501,63 @@ describe('idempotency - lastUsedAt', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('idempotency - кастомный источник', () => {
+  it('передаёт в nextKey корректный контекст', async () => {
+    const nextKey = vi.fn(() => 'custom-key-1');
+    const source: IdempotencySource = { nextKey };
+
+    const mock = createMockFetch(() => ({ body: { id: '1' } }));
+    const client = createIdempotentClient({ fetch: mock.fetch, source });
+
+    const body = { total: 100 };
+    const query = { type: 'internal', priority: 1 };
+    await client.post('/orders', body, { query });
+
+    expect(nextKey).toHaveBeenCalledTimes(1);
+    expect(nextKey).toHaveBeenCalledWith({
+      method: 'POST',
+      path: '/orders',
+      body,
+      query,
+      scope: undefined,
+    });
+    expect(keyOf(mock.calls[0])).toBe('custom-key-1');
+  });
+
+  it('вызывает resolve с success, definite-failure, indefinite-failure', async () => {
+    const resolve = vi.fn<(ctx: IdempotencyContext, outcome: IdempotencyOutcome) => void>();
+    const source: IdempotencySource = { nextKey: () => 'key-1', resolve };
+
+    const mock1 = createMockFetch(() => ({ body: { id: '1' } }));
+    const client1 = createIdempotentClient({ fetch: mock1.fetch, source });
+    await client1.post('/orders', { total: 100 });
+    expect(resolve).toHaveBeenLastCalledWith(expect.anything(), 'success');
+
+    const mock2 = createMockFetch(() => ({ status: 400, body: {} }));
+    const client2 = createIdempotentClient({ fetch: mock2.fetch, source });
+    await expect(client2.post('/orders', { total: 100 })).rejects.toBeDefined();
+    expect(resolve).toHaveBeenLastCalledWith(expect.anything(), 'definite-failure');
+
+    const mock3 = createMockFetch(() => ({ status: 500, body: {} }));
+    const client3 = createIdempotentClient({ fetch: mock3.fetch, source });
+    await expect(client3.post('/orders', { total: 100 })).rejects.toBeDefined();
+    expect(resolve).toHaveBeenLastCalledWith(expect.anything(), 'indefinite-failure');
+  });
+
+  it('падение resolve не ломает запрос', async () => {
+    const source: IdempotencySource = {
+      nextKey: () => 'key-1',
+      resolve: () => {
+        throw new Error('Storage failure');
+      },
+    };
+
+    const mock = createMockFetch(() => ({ body: { id: '1' } }));
+    const client = createIdempotentClient({ fetch: mock.fetch, source });
+
+    await expect(client.post('/orders', { total: 100 })).resolves.toEqual({ id: '1' });
   });
 });

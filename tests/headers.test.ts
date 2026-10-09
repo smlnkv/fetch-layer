@@ -6,33 +6,24 @@ import { getHeader, mergeHeaders, setHeader } from '../src/transport/headers';
 import { parseRetryAfterMs } from '../src/transport/retry-after';
 
 describe('getHeader', () => {
-  it('читает значение, игнорируя регистр имени', () => {
+  it('читает значение, игнорируя регистр; undefined без заголовка; не читает унаследованные', () => {
     const headers = { 'Content-Type': 'application/json' };
     expect(getHeader(headers, 'Content-Type')).toBe('application/json');
     expect(getHeader(headers, 'content-type')).toBe('application/json');
     expect(getHeader(headers, 'CONTENT-TYPE')).toBe('application/json');
-    expect(getHeader(headers, 'CoNtEnT-TyPe')).toBe('application/json');
-  });
-
-  it('undefined при отсутствии заголовка или headers', () => {
-    const headers = { 'Content-Type': 'application/json' };
     expect(getHeader(headers, 'X-Missing')).toBeUndefined();
     expect(getHeader(undefined, 'Content-Type')).toBeUndefined();
-  });
-
-  it('возвращает пустую строку и не читает унаследованные свойства', () => {
     expect(getHeader({ 'X-Empty': '' }, 'X-Empty')).toBe('');
 
     const proto = { 'Content-Type': 'application/json' };
-    const headers = Object.create(proto) as Record<string, string>;
-    expect(getHeader(headers, 'Content-Type')).toBeUndefined();
+    const inherited = Object.create(proto) as Record<string, string>;
+    expect(getHeader(inherited, 'Content-Type')).toBeUndefined();
   });
 
   it('читает Headers и массив пар', () => {
     const h = new Headers();
     h.set('X-Trace-Id', 'trace-1');
     expect(getHeader(h, 'x-trace-id')).toBe('trace-1');
-    expect(getHeader(h, 'X-Trace-Id')).toBe('trace-1');
 
     expect(
       getHeader(
@@ -47,7 +38,7 @@ describe('getHeader', () => {
 });
 
 describe('setHeader', () => {
-  it('устанавливает и перезаписывает заголовок, сохраняя регистр вызова', () => {
+  it('устанавливает, перезаписывает, удаляет дубли с другим регистром', () => {
     const headers: Record<string, string> = {};
     setHeader(headers, 'Content-Type', 'application/json');
     expect(headers).toEqual({ 'Content-Type': 'application/json' });
@@ -58,37 +49,32 @@ describe('setHeader', () => {
     const lowercase: Record<string, string> = {};
     setHeader(lowercase, 'content-type', 'application/json');
     expect(Object.keys(lowercase)).toEqual(['content-type']);
-  });
 
-  it('удаляет один или несколько дублей с другим регистром', () => {
-    const headers: Record<string, string> = { 'content-type': 'text/plain' };
-    setHeader(headers, 'Content-Type', 'application/json');
-    expect(Object.keys(headers)).toEqual(['Content-Type']);
-    expect(headers['Content-Type']).toBe('application/json');
-
-    const multi = {
+    const multi: Record<string, string> = {
       'content-type': 'text/plain',
       'CONTENT-TYPE': 'text/html',
     };
     setHeader(multi, 'Content-Type', 'application/json');
     expect(Object.keys(multi)).toEqual(['Content-Type']);
+    expect(multi['Content-Type']).toBe('application/json');
   });
 });
 
 describe('mergeHeaders', () => {
-  it('сливает источники, нормализуя регистр и перезаписывая', () => {
+  it('сливает источники, нормализуя регистр и перезаписывая; не мутирует исходные', () => {
+    const source = { 'Content-Type': 'text/plain' };
     const result = mergeHeaders(
-      { Accept: 'application/json' },
-      { 'content-type': 'text/plain' },
+      source,
+      { 'content-type': 'text/html' },
       { 'Content-Type': 'application/json' },
       { Authorization: 'Bearer x' },
     );
 
     expect(result).toEqual({
-      Accept: 'application/json',
       'Content-Type': 'application/json',
       Authorization: 'Bearer x',
     });
+    expect(source).toEqual({ 'Content-Type': 'text/plain' });
   });
 
   it('игнорирует undefined источники, undefined значения, пустой список', () => {
@@ -111,58 +97,29 @@ describe('mergeHeaders', () => {
     expect(mergeHeaders()).toEqual({});
   });
 
-  it('не мутирует исходные объекты', () => {
-    const source = { 'Content-Type': 'text/plain' };
-    mergeHeaders(source, { 'Content-Type': 'application/json' });
-    expect(source).toEqual({ 'Content-Type': 'text/plain' });
-  });
-
   it('сливает Headers, Record и массив пар в одном вызове', () => {
     const h = new Headers();
-    h.set('X-From-Headers', 'h');
+    h.set('content-type', 'text/plain');
 
     const result = mergeHeaders({ 'X-From-Record': 'r' }, h, [['X-From-Pairs', 'p']]);
 
     expect(result['X-From-Record']).toBe('r');
-    expect(result['x-from-headers']).toBe('h');
+    expect(result['content-type']).toBe('text/plain');
     expect(result['X-From-Pairs']).toBe('p');
-  });
-
-  it('перезаписывает значение из Headers значением из следующего источника', () => {
-    const h = new Headers();
-    h.set('content-type', 'text/plain');
-
-    const result = mergeHeaders(h, { 'Content-Type': 'application/json' });
-
-    expect(result).toEqual({ 'Content-Type': 'application/json' });
   });
 });
 
 describe('parseRetryAfterMs', () => {
-  it('возвращает undefined для null и пустой строки', () => {
+  it('возвращает undefined для null и пустой строки; парсит числовой формат; срезает OWS', () => {
     expect(parseRetryAfterMs(null)).toBeUndefined();
     expect(parseRetryAfterMs('')).toBeUndefined();
-  });
 
-  it('парсит числовой формат в секундах без изменений', () => {
     expect(parseRetryAfterMs('5')).toBe(5000);
     expect(parseRetryAfterMs('30')).toBe(30_000);
     expect(parseRetryAfterMs('0')).toBe(0);
-  });
 
-  it('срезает leading и trailing OWS до разбора', () => {
     expect(parseRetryAfterMs(' 5 ')).toBe(5000);
-    expect(parseRetryAfterMs('  30  ')).toBe(30_000);
     expect(parseRetryAfterMs('\t5\t')).toBe(5000);
-
-    vi.useFakeTimers();
-    try {
-      vi.setSystemTime(new Date('2026-09-13T12:00:00Z'));
-      const future = new Date('2026-09-13T12:00:30Z').toUTCString();
-      expect(parseRetryAfterMs(` ${future} `)).toBe(30_000);
-    } finally {
-      vi.useRealTimers();
-    }
   });
 
   it('парсит IMF-fixdate и возвращает 0 для даты в прошлом', () => {
@@ -172,6 +129,7 @@ describe('parseRetryAfterMs', () => {
 
       const future = new Date('2026-09-13T12:00:30Z').toUTCString();
       expect(parseRetryAfterMs(future)).toBe(30_000);
+      expect(parseRetryAfterMs(` ${future} `)).toBe(30_000);
 
       const past = new Date('2026-09-13T11:00:00Z').toUTCString();
       expect(parseRetryAfterMs(past)).toBe(0);

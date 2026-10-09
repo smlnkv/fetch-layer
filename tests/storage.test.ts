@@ -5,21 +5,18 @@ import { describe, expect, it } from 'vitest';
 import { createMemoryStorage, fromWebStorage } from '../src/shared/storage';
 
 describe('createMemoryStorage', () => {
-  it('сохраняет, читает, перезаписывает', () => {
+  it('сохраняет, читает, перезаписывает; null для отсутствующего; удаление идемпотентно', () => {
     const storage = createMemoryStorage();
+
+    expect(storage.getItem('missing')).toBeNull();
+    expect(() => storage.removeItem('missing')).not.toThrow();
+
     storage.setItem('key', 'value');
     expect(storage.getItem('key')).toBe('value');
 
     storage.setItem('key', 'value2');
     expect(storage.getItem('key')).toBe('value2');
-  });
 
-  it('null для отсутствующего ключа, удаление идемпотентно', () => {
-    const storage = createMemoryStorage();
-    expect(storage.getItem('missing')).toBeNull();
-    expect(() => storage.removeItem('missing')).not.toThrow();
-
-    storage.setItem('key', 'value');
     storage.removeItem('key');
     expect(storage.getItem('key')).toBeNull();
   });

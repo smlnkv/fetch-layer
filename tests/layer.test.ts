@@ -55,27 +55,12 @@ describe('validateLayerOrder - порядок stage', () => {
     ).toThrow(/order/);
   });
 
-  it('принимает кастомный слой со stage 2.5 между idempotency и retry', () => {
+  it('принимает кастомный слой со stage 2.5 или 1.5 между встроенными', () => {
     const withMetrics: Layer = {
       name: 'withMetrics',
       stage: 2.5,
       wrap: (next) => ({ fn: next }),
     };
-
-    expect(() =>
-      createClient({
-        baseUrl: '/api',
-        layers: [
-          withIdempotency({ nextKey: () => 'k' }),
-          withMetrics,
-          withRetry({ maxAttempts: 1 }),
-          withAuth({ provider: createTestSessionProvider() }),
-        ],
-      }),
-    ).not.toThrow();
-  });
-
-  it('принимает кастомный слой со stage 1.5 между retry и auth', () => {
     const withLogging: Layer = {
       name: 'withLogging',
       stage: 1.5,
@@ -86,6 +71,8 @@ describe('validateLayerOrder - порядок stage', () => {
       createClient({
         baseUrl: '/api',
         layers: [
+          withIdempotency({ nextKey: () => 'k' }),
+          withMetrics,
           withRetry({ maxAttempts: 1 }),
           withLogging,
           withAuth({ provider: createTestSessionProvider() }),
@@ -96,16 +83,14 @@ describe('validateLayerOrder - порядок stage', () => {
 });
 
 describe('validateLayerOrder - дубликаты', () => {
-  it('ошибка при дубликате слоя по name', () => {
+  it('ошибка при дубликате слоя по name (встроенного и кастомного)', () => {
     expect(() =>
       createClient({
         baseUrl: '/api',
         layers: [withRetry({ maxAttempts: 1 }), withRetry({ maxAttempts: 1 })],
       }),
     ).toThrow(/more than once/);
-  });
 
-  it('ошибка при дубликате кастомного слоя, с именем в сообщении', () => {
     const custom: Layer = {
       name: 'withTiming',
       wrap: (next) => ({ fn: next }),

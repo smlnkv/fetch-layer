@@ -88,18 +88,16 @@ describe('client - head и options', () => {
 });
 
 describe('client - пустые ответы', () => {
-  it('204 возвращает undefined', async () => {
+  it('204 и 304 возвращают undefined', async () => {
     const mock = createMockFetch(() => ({ status: 204 }));
     const client = createTestClient({ fetch: mock.fetch });
 
     expect(await client.delete('/users/1')).toBeUndefined();
-  });
 
-  it('304 не вызывает парсер', async () => {
-    const mock = createMockFetch(() => ({ status: 304 }));
-    const client = createTestClient({ fetch: mock.fetch });
+    const mock2 = createMockFetch(() => ({ status: 304 }));
+    const client2 = createTestClient({ fetch: mock2.fetch });
 
-    expect(await client.get('/users')).toBeUndefined();
+    expect(await client2.get('/users')).toBeUndefined();
   });
 });
 
@@ -128,46 +126,63 @@ describe('client - ошибки', () => {
     }
   });
 
-  it('HTTP_{status} как fallback code', async () => {
-    const mock = createMockFetch(() => ({ status: 500, body: {} }));
-    const client = createTestClient({ fetch: mock.fetch });
-
-    await expect(client.get('/users')).rejects.toMatchObject({
+  it('HTTP_{status} как fallback code и plain-text ошибки в message', async () => {
+    // Пустое тело: code и message формируются из статуса.
+    const mock1 = createMockFetch(() => ({ status: 500, body: {} }));
+    const client1 = createTestClient({ fetch: mock1.fetch });
+    await expect(client1.get('/users')).rejects.toMatchObject({
       code: 'HTTP_500',
       message: 'HTTP 500',
     });
+
+    // Plain-text тело: message от сервера, rawBody сохраняет строку.
+    const mock2 = createMockFetch(() => ({
+      status: 500,
+      bodyAsText: 'database is down',
+      headers: { 'content-type': 'text/plain' },
+    }));
+    const client2 = createTestClient({ fetch: mock2.fetch });
+
+    try {
+      await client2.get('/users');
+      expect.fail('should have thrown');
+    } catch (e) {
+      const err = toApiError(e);
+      expect(err.status).toBe(500);
+      expect(err.message).toBe('database is down');
+      expect(err.rawBody).toBe('database is down');
+      expect(err.code).toBe('HTTP_500');
+    }
   });
 
-  it('isUncertain: true для 5xx, false для 4xx', async () => {
-    const mock = createMockFetch((url) => {
+  it('isUncertain: true для 5xx и network, false для 4xx', async () => {
+    const mock1 = createMockFetch((url) => {
       if (url.endsWith('/server-error')) return { status: 503, body: { code: 'UNAVAILABLE' } };
       return { status: 400, body: { code: 'BAD_REQUEST' } };
     });
-    const client = createTestClient({ fetch: mock.fetch });
+    const client1 = createTestClient({ fetch: mock1.fetch });
 
     try {
-      await client.get('/server-error');
+      await client1.get('/server-error');
       expect.fail('should have thrown');
     } catch (e) {
       expect(toApiError(e).isUncertain).toBe(true);
     }
 
     try {
-      await client.get('/client-error');
+      await client1.get('/client-error');
       expect.fail('should have thrown');
     } catch (e) {
       expect(toApiError(e).isUncertain).toBe(false);
     }
-  });
 
-  it('обрабатывает network error', async () => {
-    const mock = createMockFetch(() => {
+    const mock2 = createMockFetch(() => {
       throw new TypeError('Failed to fetch');
     });
-    const client = createTestClient({ fetch: mock.fetch });
+    const client2 = createTestClient({ fetch: mock2.fetch });
 
     try {
-      await client.get('/users');
+      await client2.get('/users');
       expect.fail('should have thrown');
     } catch (e) {
       const err = toApiError(e);
@@ -192,26 +207,6 @@ describe('client - ошибки', () => {
       expect(err.code).toBe('PARSE_ERROR');
       expect(err.message).toMatch(/as json/);
       expect(err.message).toMatch(/text\/html/);
-    }
-  });
-
-  it('plain-text ошибки попадают в message', async () => {
-    const mock = createMockFetch(() => ({
-      status: 500,
-      bodyAsText: 'database is down',
-      headers: { 'content-type': 'text/plain' },
-    }));
-    const client = createTestClient({ fetch: mock.fetch });
-
-    try {
-      await client.get('/users');
-      expect.fail('should have thrown');
-    } catch (e) {
-      const err = toApiError(e);
-      expect(err.status).toBe(500);
-      expect(err.message).toBe('database is down');
-      expect(err.rawBody).toBe('database is down');
-      expect(err.code).toBe('HTTP_500');
     }
   });
 });
@@ -337,30 +332,28 @@ describe('client - errorBodyFormat', () => {
 });
 
 describe('client - query-параметры', () => {
-  it('сериализует query в URL', async () => {
-    const mock = createMockFetch(() => ({ body: {} }));
-    const client = createTestClient({ fetch: mock.fetch });
+  it('сериализует query в URL и использует форматы клиента по умолчанию', async () => {
+    const mock1 = createMockFetch(() => ({ body: {} }));
+    const client1 = createTestClient({ fetch: mock1.fetch });
 
-    await client.get('/products', {
+    await client1.get('/products', {
       query: { page: 1, limit: 20 },
     });
 
-    expect(mock.calls[0]?.url).toBe('https://api.test/products?limit=20&page=1');
-  });
+    expect(mock1.calls[0]?.url).toBe('https://api.test/products?limit=20&page=1');
 
-  it('использует форматы клиента по умолчанию', async () => {
-    const mock = createMockFetch(() => ({ body: {} }));
-    const client = createTestClient({
-      fetch: mock.fetch,
+    const mock2 = createMockFetch(() => ({ body: {} }));
+    const client2 = createTestClient({
+      fetch: mock2.fetch,
       queryArrayFormat: 'comma',
       queryObjectFormat: 'dots',
     });
 
-    await client.get('/products', {
+    await client2.get('/products', {
       query: { ids: [1, 2], filter: { status: 'active' } },
     });
 
-    expect(mock.calls[0]?.url).toBe('https://api.test/products?filter.status=active&ids=1,2');
+    expect(mock2.calls[0]?.url).toBe('https://api.test/products?filter.status=active&ids=1,2');
   });
 
   it('per-request переопределение формата', async () => {
@@ -494,10 +487,11 @@ describe('client - timeoutMs', () => {
     }
   });
 
-  it('запрос успешен, если per-request timeoutMs больше клиентского', async () => {
+  it('per-request timeoutMs переопределяет клиентский', async () => {
+    // Больше клиентского: запрос успешен.
     vi.useFakeTimers();
     try {
-      const mock = createMockFetch(
+      const mock1 = createMockFetch(
         (_, init) =>
           new Promise((resolve, reject) => {
             init.signal?.addEventListener('abort', () => {
@@ -506,23 +500,18 @@ describe('client - timeoutMs', () => {
             setTimeout(() => resolve({ body: { ok: true } }), 1000);
           }),
       );
-
-      const client = createTestClient({ fetch: mock.fetch, timeoutMs: 100 });
-
-      const promise = client.get('/slow', { timeoutMs: 2000 });
-
+      const client1 = createTestClient({ fetch: mock1.fetch, timeoutMs: 100 });
+      const promise1 = client1.get('/slow', { timeoutMs: 2000 });
       await vi.advanceTimersByTimeAsync(1100);
-
-      await expect(promise).resolves.toEqual({ ok: true });
+      await expect(promise1).resolves.toEqual({ ok: true });
     } finally {
       vi.useRealTimers();
     }
-  });
 
-  it('запрос падает по таймауту, если per-request timeoutMs меньше клиентского', async () => {
+    // Меньше клиентского: падает.
     vi.useFakeTimers();
     try {
-      const mock = createMockFetch(
+      const mock2 = createMockFetch(
         (_, init) =>
           new Promise((resolve, reject) => {
             init.signal?.addEventListener('abort', () => {
@@ -531,22 +520,14 @@ describe('client - timeoutMs', () => {
             setTimeout(() => resolve({ body: {} }), 5000);
           }),
       );
-
-      const client = createTestClient({ fetch: mock.fetch, timeoutMs: 10_000 });
-
-      const promise = client.get('/slow', { timeoutMs: 100 });
-      promise.catch(() => {});
-
+      const client2 = createTestClient({ fetch: mock2.fetch, timeoutMs: 10_000 });
+      const promise2 = client2.get('/slow', { timeoutMs: 100 });
+      promise2.catch(() => {});
       await vi.advanceTimersByTimeAsync(200);
-
-      try {
-        await promise;
-        expect.fail('should have thrown');
-      } catch (e) {
-        const err = toApiError(e);
-        expect(err.kind).toBe('timeout');
-        expect(err.code).toBe('TIMEOUT');
-      }
+      await expect(promise2).rejects.toMatchObject({
+        kind: 'timeout',
+        code: 'TIMEOUT',
+      });
     } finally {
       vi.useRealTimers();
     }
@@ -619,11 +600,11 @@ describe('client - signal', () => {
     });
   });
 
-  it('внешний signal + timeout: срабатывает таймаут', async () => {
+  it('внешний signal + timeout: побеждает первый сработавший', async () => {
+    // Побеждает таймаут.
     vi.useFakeTimers();
     try {
       const controller = new AbortController();
-
       const mock = createMockFetch(
         (_, init) =>
           new Promise((resolve, reject) => {
@@ -633,15 +614,9 @@ describe('client - signal', () => {
             setTimeout(() => resolve({ body: {} }), 10_000);
           }),
       );
-
-      const client = createTestClient({
-        fetch: mock.fetch,
-        timeoutMs: 100,
-      });
-
+      const client = createTestClient({ fetch: mock.fetch, timeoutMs: 100 });
       const promise = client.get('/slow', { signal: controller.signal });
       promise.catch(() => {});
-
       await vi.advanceTimersByTimeAsync(200);
 
       try {
@@ -655,13 +630,11 @@ describe('client - signal', () => {
     } finally {
       vi.useRealTimers();
     }
-  });
 
-  it('внешний signal + timeout: срабатывает внешний abort', async () => {
+    // Побеждает внешний abort.
     vi.useFakeTimers();
     try {
       const controller = new AbortController();
-
       const mock = createMockFetch(
         (_, init) =>
           new Promise((resolve, reject) => {
@@ -671,15 +644,9 @@ describe('client - signal', () => {
             setTimeout(() => resolve({ body: {} }), 10_000);
           }),
       );
-
-      const client = createTestClient({
-        fetch: mock.fetch,
-        timeoutMs: 10_000,
-      });
-
+      const client = createTestClient({ fetch: mock.fetch, timeoutMs: 10_000 });
       const promise = client.get('/slow', { signal: controller.signal });
       promise.catch(() => {});
-
       await vi.advanceTimersByTimeAsync(50);
       controller.abort();
 
@@ -687,8 +654,7 @@ describe('client - signal', () => {
         await promise;
         expect.fail('should have thrown');
       } catch (e) {
-        const err = toApiError(e);
-        expect(err.isCancelled).toBe(true);
+        expect(toApiError(e).isCancelled).toBe(true);
       }
     } finally {
       vi.useRealTimers();

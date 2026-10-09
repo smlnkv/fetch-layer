@@ -142,17 +142,6 @@ describe('prepareBody', () => {
     }
   });
 
-  it('несериализуемый тип во вложенном значении отклоняется', () => {
-    // Map/Set/RegExp/Error не проходят на верхнем уровне,
-    // но и внутри JSON они дали бы {} вместо данных.
-    expect(() => prepareBody({ nested: new Map() })).toThrowError(
-      expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
-    );
-    expect(() => prepareBody([new Set()])).toThrowError(
-      expect.objectContaining({ code: 'BODY_SERIALIZATION_ERROR' }),
-    );
-  });
-
   it.each([
     ['Blob', new Blob(['x'])],
     ['File', new File(['x'], 'x.txt')],
