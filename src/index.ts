@@ -27,7 +27,6 @@ export { createMemoryStorage, fromWebStorage, type StorageLike } from './shared/
 
 export type {
   Client,
-  Hooks,
   HttpMethod,
   QueryArrayFormat,
   QueryObjectFormat,

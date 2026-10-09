@@ -1,6 +1,5 @@
 import { buildErrorParser } from '../core/error-body';
 import { ApiError, classifyFetchError, toApiError } from '../core/errors';
-import { runOnBeforeSend, runOnResponse } from '../core/hooks';
 import { isStreamingBody } from '../shared/classify-body';
 import { setAbortTimeout, throwIfAborted } from '../shared/signals';
 
@@ -11,7 +10,6 @@ import { buildUrl } from './url';
 
 import type { ErrorBodyFormat, ErrorBodyParser } from '../core/error-body';
 import type {
-  Hooks,
   QueryArrayFormat,
   QueryObjectFormat,
   RequestFn,
@@ -52,12 +50,6 @@ export interface TransportOptions {
 
   /** Кастомный парсер тела ошибки. Приоритет над errorBodyFormat. */
   parseErrorBody?: ErrorBodyParser;
-
-  /**
-   * Колбэки жизненного цикла. Транспорт вызывает onBeforeSend
-   * и onResponse, остальные - createClient и слои.
-   */
-  hooks?: Hooks;
 }
 
 /**
@@ -73,7 +65,6 @@ export function createBaseRequest(options: TransportOptions): RequestFn {
     credentials: defaultCredentials,
     queryArrayFormat: defaultArrayFormat = 'repeat',
     queryObjectFormat: defaultObjectFormat = 'brackets',
-    hooks,
   } = options;
 
   const errorParser = buildErrorParser({
@@ -116,8 +107,7 @@ export function createBaseRequest(options: TransportOptions): RequestFn {
     }
 
     // Финальные заголовки, с Accept и Content-Type. Тот же
-    // объект видят onBeforeSend и onResponse, он же прикрепляется
-    // к ApiError, возникшей внутри try.
+    // объект прикрепляется к ApiError, возникшей внутри try.
     const finalConfig: ResolvedRequestConfig = { ...config, headers };
 
     const effectiveTimeoutMs = config.timeoutMs ?? defaultTimeoutMs;
@@ -150,8 +140,6 @@ export function createBaseRequest(options: TransportOptions): RequestFn {
         (init as RequestInit & { duplex: 'half' }).duplex = 'half';
       }
 
-      runOnBeforeSend(hooks, finalConfig);
-
       // TypeError вокруг fetch означает сетевую ошибку. Только
       // здесь: в остальных местах источник TypeError неизвестен.
       let response: Response;
@@ -171,7 +159,6 @@ export function createBaseRequest(options: TransportOptions): RequestFn {
       // 204 и 304 - тела нет. Проверяем до response.ok так как
       // 304 не входит в диапазон ok.
       if (response.status === 204 || response.status === 304) {
-        runOnResponse(hooks, finalConfig, meta);
         if (includeMeta) {
           return { data: undefined, meta } as unknown as T;
         }
@@ -197,7 +184,6 @@ export function createBaseRequest(options: TransportOptions): RequestFn {
 
       // Тело может отсутствовать и при 2xx: HEAD с 200, DELETE без тела.
       if (!response.body) {
-        runOnResponse(hooks, finalConfig, meta);
         if (includeMeta) {
           return { data: undefined, meta } as unknown as T;
         }
@@ -205,8 +191,6 @@ export function createBaseRequest(options: TransportOptions): RequestFn {
       }
 
       const data = await parseResponse(response, responseType);
-
-      runOnResponse(hooks, finalConfig, meta);
 
       if (includeMeta) {
         return { data, meta } as unknown as T;

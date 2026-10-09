@@ -1,5 +1,4 @@
 import { type ApiError, toApiError } from '../../core/errors';
-import { runOnRetry } from '../../core/hooks';
 import { isStreamingBody } from '../../shared/classify-body';
 import { isMutatingMethod } from '../../shared/method';
 import { safeCall } from '../../shared/safe-call';
@@ -95,6 +94,19 @@ export interface RetryOptions {
    * @param attempt - номер провалившейся попытки, считая с 1.
    */
   computeDelay?: (attempt: number, error: ApiError) => number;
+
+  /**
+   * Вызывается перед каждой попыткой повтора. Может вернуть новый
+   * конфиг или undefined, чтобы оставить текущий. Например, заменить
+   * Idempotency-Key при 409.
+   *
+   * @param attempt - номер попытки с 1. Первый повтор: attempt === 1.
+   */
+  onRetry?: (
+    config: ResolvedRequestConfig,
+    attempt: number,
+    error: ApiError,
+  ) => ResolvedRequestConfig | void;
 
   /** Пауза между попытками. По умолчанию setTimeout с отменой. */
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
@@ -241,7 +253,7 @@ export function withRetry(options: RetryOptions = {}): Layer {
           );
         }
 
-        let config = initialConfig;
+        const config = initialConfig;
 
         for (let attempt = 0; attempt < maxAttempts; attempt++) {
           throwIfAborted(config.signal);
@@ -275,10 +287,9 @@ export function withRetry(options: RetryOptions = {}): Layer {
               delay = Math.min(clampDelay(computed, MIN_RETRY_MS), maxDelayMs);
             }
 
-            config = runOnRetry(context.hooks, config, failedAttempt, err);
-
-            // onRetry вернул конфиг со skipRetry: следующей попытки
-            // не будет. Проверяем до sleep, чтобы не ждать зря.
+            // onBeforeRetry может вернуть конфиг со skipRetry:
+            // следующей попытки не будет. Проверяем до sleep,
+            // чтобы не ждать зря.
             if (config.skipRetry) throw err;
 
             await sleep(delay, config.signal);

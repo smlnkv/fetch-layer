@@ -711,28 +711,6 @@ describe('client - валидация', () => {
 
     expect(mock.calls).toHaveLength(0);
   });
-
-  it('onRequest может вернуть невалидный path или timeoutMs, ошибка ловится до pipeline', async () => {
-    const mock = createMockFetch(() => ({ body: {} }));
-
-    const clientPath = createTestClient({
-      fetch: mock.fetch,
-      hooks: {
-        onRequest: (config) => ({ ...config, path: '' }),
-      },
-    });
-    await expect(clientPath.get('/users')).rejects.toThrow(/client: path/);
-
-    const clientTimeout = createTestClient({
-      fetch: mock.fetch,
-      hooks: {
-        onRequest: (config) => ({ ...config, timeoutMs: -1 }),
-      },
-    });
-    await expect(clientTimeout.get('/users')).rejects.toThrow(/client: timeoutMs/);
-
-    expect(mock.calls).toHaveLength(0);
-  });
 });
 
 describe('createClient - валидация', () => {

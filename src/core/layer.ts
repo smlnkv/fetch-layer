@@ -1,4 +1,4 @@
-import type { Client, Hooks, RequestFn } from './types';
+import type { Client, RequestFn } from './types';
 
 /**
  * Логгер для внутренних сообщений. Все методы опциональны.
@@ -25,7 +25,6 @@ export interface Logger {
  * pipeline. Относится к клиенту в целом, а не к конкретному слою.
  */
 export interface LayerContext {
-  readonly hooks?: Hooks;
   readonly logger?: Logger;
 }
 
@@ -74,11 +73,10 @@ export interface Layer {
    * наружу: последний слой в массиве получает базовый транспорт,
    * каждый предыдущий - результат следующего.
    *
-   * Контекст (hooks, logger) собирается один раз и передаётся всем
-   * слоям. state сохраняется рядом с pipeline и возвращается в attach
-   * этого же слоя - так слой связывает своё состояние с конкретным
-   * клиентом, даже если один и тот же Layer используется в нескольких
-   * клиентах.
+   * Контекст собирается один раз и передаётся всем слоям. state
+   * сохраняется рядом с pipeline и возвращается в attach этого же
+   * слоя - так слой связывает своё состояние с конкретным клиентом,
+   * даже если один и тот же Layer используется в нескольких клиентах.
    */
   wrap(next: RequestFn, context: LayerContext): LayerWrapResult;
 

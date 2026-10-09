@@ -5,8 +5,6 @@ import { createSessionSource } from '../src/layers/idempotency/index';
 
 import { createMockFetch, createTestClient, createTestStorage } from './helpers';
 
-import type { ResolvedRequestConfig } from '../src/core/types';
-
 describe('integration - полный pipeline', () => {
   it('401 -> refresh -> успех с сохранением Idempotency-Key', async () => {
     const calls: Array<{ auth?: string; idempotency?: string; status: number }> = [];
@@ -365,37 +363,6 @@ describe('integration - envelope + parseErrorBody', () => {
         content: { code: 'NOT_FOUND', message: 'User not found' },
       });
     }
-  });
-});
-
-describe('integration - хуки и слои', () => {
-  it('onBeforeSend видит финальные заголовки и при retry', async () => {
-    const captured: ResolvedRequestConfig[] = [];
-
-    let attempts = 0;
-    const mock = createMockFetch(() => {
-      attempts++;
-      if (attempts < 2) return { status: 500, body: {} };
-      return { body: { ok: true } };
-    });
-
-    const client = createTestClient({
-      fetch: mock.fetch,
-      retry: { maxAttempts: 3, sleep: () => Promise.resolve() },
-      idempotency: { source: { nextKey: () => 'key-1' } },
-      hooks: {
-        onBeforeSend: (config) => {
-          captured.push(config);
-        },
-      },
-    });
-
-    await client.post('/orders', { total: 100 });
-
-    expect(captured).toHaveLength(2);
-    // Ключ идемпотентности одинаков для обеих попыток.
-    expect(captured[0]?.headers?.['Idempotency-Key']).toBe('key-1');
-    expect(captured[1]?.headers?.['Idempotency-Key']).toBe('key-1');
   });
 });
 

@@ -1,5 +1,4 @@
 import { toApiError } from './core/errors';
-import { runOnError, runOnRequest } from './core/hooks';
 import { applyLayers, runAttach, validateLayerOrder } from './core/layer';
 import { safeCall } from './shared/safe-call';
 import { assertNonEmptyString } from './shared/validators';
@@ -58,7 +57,7 @@ export interface ClientOptions extends TransportOptions {
 /**
  * Приводит публичный RequestConfig к внутреннему виду: заголовки
  * нормализуются в Record. undefined остаётся undefined, чтобы
- * хуки не видели пустой объект вместо отсутствия заголовков.
+ * слои не видели пустой объект вместо отсутствия заголовков.
  */
 function resolveConfig(config: RequestConfig): ResolvedRequestConfig {
   return {
@@ -82,13 +81,11 @@ function assertTimeout(value: unknown, prefix: string): asserts value is number 
 
 /**
  * Собирает pipeline из базового транспорта и слоёв, валидирует
- * порядок. Поверх pipeline - обёртка с onRequest (один раз
- * на операцию) и onError (один раз на финальную ошибку).
+ * порядок.
  *
  * @throws Error если конфигурация некорректна: пустой baseUrl,
  *   невалидный или слишком маленький timeoutMs, недоступный fetch,
- *   layers не массив, нарушение порядка слоёв, дубликаты имён,
- *   дубликаты stage.
+ *   нарушение порядка слоёв, дубликаты имён, дубликаты stage.
  */
 export function createClient(options: ClientOptions): Client {
   validateOptions(options);
@@ -99,7 +96,6 @@ export function createClient(options: ClientOptions): Client {
   validateLayerOrder(layers);
 
   const context: LayerContext = {
-    hooks: options.hooks,
     logger,
   };
 
@@ -108,21 +104,19 @@ export function createClient(options: ClientOptions): Client {
 
   const wrapped: PublicRequestFn = async <T>(config: RequestConfig): Promise<T> => {
     const resolved = resolveConfig(config);
-    const hooked = runOnRequest(options.hooks, resolved);
 
-    // Проверяем поля после onRequest, а не исходные.
-    assertNonEmptyString(hooked.path, 'client: path');
+    assertNonEmptyString(resolved.path, 'client: path');
 
-    if (hooked.timeoutMs !== undefined) {
-      assertTimeout(hooked.timeoutMs, 'client');
+    if (resolved.timeoutMs !== undefined) {
+      assertTimeout(resolved.timeoutMs, 'client');
     }
 
     // Нормализуем метод до верхнего регистра: слои (withIdempotency,
     // withRetry) сравнивают его со строками 'POST', 'PUT' и другими.
     // Fetch нормализует сам, но слои получают конфиг до fetch.
     const finalConfig: ResolvedRequestConfig = {
-      ...hooked,
-      method: (hooked.method ?? 'GET').toUpperCase() as HttpMethod,
+      ...resolved,
+      method: (resolved.method ?? 'GET').toUpperCase() as HttpMethod,
     };
 
     const method = finalConfig.method as HttpMethod;
@@ -149,11 +143,6 @@ export function createClient(options: ClientOptions): Client {
         );
       }
 
-      // err.config выставляется транспортом для ошибок внутри try.
-      // Для ошибок до try (сериализация тела, pre-abort) остаётся
-      // undefined, и onError получает конфиг после onRequest,
-      // без финальных заголовков Accept и Content-Type.
-      runOnError(options.hooks, error.config ?? finalConfig, error);
       throw error;
     }
   };
