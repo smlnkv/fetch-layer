@@ -183,7 +183,7 @@ Each client has its own state. The same `Layer` object can be passed to two `cre
 
 ### Why layered architecture instead of hooks and interceptors
 
-A layer is a decorator: it takes `next` and returns its own version. This shape allows things callbacks can't do: skip the request, call it twice, catch an error and continue.
+A layer controls the call: it can call `next` several times, catch an error and call again with different data, run code before and after. A callback can't do this — it receives data and returns it back.
 
 A hook in ky and ofetch, or an interceptor in axios, is a callback invoked at a fixed point: before the request or after the response. Each one gets data and returns it back.
 
