@@ -85,6 +85,30 @@ describe('client - head и options', () => {
     expect(result.meta.headers.get('content-length')).toBe('1024');
     expect(mock.calls[0]?.method).toBe(method);
   });
+
+  it('тело, присланное сервером на HEAD или OPTIONS, отбрасывается', async () => {
+    const mockHead = createMockFetch(() => ({
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+      body: { leaked: 'data' },
+    }));
+    const clientHead = createTestClient({ fetch: mockHead.fetch });
+
+    const resultHead = await clientHead.head('/files/report.pdf');
+    expect(resultHead.data).toBeUndefined();
+    expect(resultHead.meta.status).toBe(200);
+
+    const mockOptions = createMockFetch(() => ({
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+      body: { methods: ['GET', 'POST'] },
+    }));
+    const clientOptions = createTestClient({ fetch: mockOptions.fetch });
+
+    const resultOptions = await clientOptions.options('/files');
+    expect(resultOptions.data).toBeUndefined();
+    expect(resultOptions.meta.status).toBe(200);
+  });
 });
 
 describe('client - пустые ответы', () => {
@@ -102,7 +126,7 @@ describe('client - пустые ответы', () => {
 });
 
 describe('client - ошибки', () => {
-  it('404 с телом: code, message, rawBody, requestId', async () => {
+  it('404 с телом: code, message, rawBody, requestId из заголовка', async () => {
     const mock = createMockFetch(() => ({
       status: 404,
       headers: { 'x-request-id': 'req-404' },
@@ -247,7 +271,7 @@ describe('client - parseErrorBody', () => {
     }
   });
 
-  it('использует requestId из заголовка, если парсер его не вернул', async () => {
+  it('requestId всегда берётся из заголовка', async () => {
     const mock = createMockFetch(() => ({
       status: 400,
       headers: { 'x-request-id': 'header-req-id' },
@@ -614,32 +638,43 @@ describe('client - request()', () => {
 });
 
 describe('client - валидация', () => {
-  it('ошибка до запроса при пустом или нестроковом path', async () => {
+  it('ошибка INVALID_REQUEST_CONFIG при пустом или нестроковом path', async () => {
     const mock = createMockFetch(() => ({ body: {} }));
     const client = createTestClient({ fetch: mock.fetch });
 
-    await expect(client.get('')).rejects.toThrow(/client: path/);
-    await expect(client.get(null as unknown as string)).rejects.toThrow(/client: path/);
+    for (const badPath of ['', null]) {
+      try {
+        await client.get(badPath as unknown as string);
+        expect.fail('should have thrown');
+      } catch (e) {
+        expect(e).toBeInstanceOf(ApiError);
+        const err = e as ApiError;
+        expect(err.kind).toBe('unknown');
+        expect(err.code).toBe('INVALID_REQUEST_CONFIG');
+        expect(err.message).toMatch(/client: path/);
+        expect(err.cause).toBeInstanceOf(Error);
+      }
+    }
 
     expect(mock.calls).toHaveLength(0);
   });
 
-  it('ошибка до запроса при невалидном per-request timeoutMs', async () => {
+  it('ошибка INVALID_REQUEST_CONFIG при невалидном per-request timeoutMs', async () => {
     const mock = createMockFetch(() => ({ body: {} }));
     const client = createTestClient({ fetch: mock.fetch });
 
-    await expect(client.get('/users', { timeoutMs: -1 })).rejects.toThrow(
-      /client: timeoutMs must be a number >= 100 ms/,
-    );
-    await expect(client.get('/users', { timeoutMs: 0 })).rejects.toThrow(
-      /client: timeoutMs must be a number >= 100 ms/,
-    );
-    await expect(client.get('/users', { timeoutMs: NaN })).rejects.toThrow(
-      /client: timeoutMs must be a number >= 100 ms/,
-    );
-    await expect(client.get('/users', { timeoutMs: 50 })).rejects.toThrow(
-      /client: timeoutMs must be a number >= 100 ms/,
-    );
+    for (const badTimeout of [-1, 0, NaN, 50]) {
+      try {
+        await client.get('/users', { timeoutMs: badTimeout });
+        expect.fail('should have thrown');
+      } catch (e) {
+        expect(e).toBeInstanceOf(ApiError);
+        const err = e as ApiError;
+        expect(err.kind).toBe('unknown');
+        expect(err.code).toBe('INVALID_REQUEST_CONFIG');
+        expect(err.message).toMatch(/client: timeoutMs must be a number >= 100 ms/);
+      }
+    }
 
     expect(mock.calls).toHaveLength(0);
   });

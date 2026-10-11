@@ -1,4 +1,4 @@
-import { toApiError } from './core/errors';
+import { ApiError, toApiError } from './core/errors';
 import { applyLayers, runAttach, validateLayerOrder } from './core/layer';
 import { assertNonEmptyString } from './shared/validators';
 import { mergeHeaders } from './transport/headers';
@@ -97,19 +97,29 @@ export function createClient(options: ClientOptions): Client {
   const wrapped: PublicRequestFn = async <T>(config: RequestConfig): Promise<T> => {
     const resolved = resolveConfig(config);
 
-    assertNonEmptyString(resolved.path, 'client: path');
+    let finalConfig: ResolvedRequestConfig;
+    try {
+      assertNonEmptyString(resolved.path, 'client: path');
 
-    if (resolved.timeoutMs !== undefined) {
-      assertTimeout(resolved.timeoutMs, 'client');
+      if (resolved.timeoutMs !== undefined) {
+        assertTimeout(resolved.timeoutMs, 'client');
+      }
+
+      // Нормализуем метод до верхнего регистра: слои (withIdempotency,
+      // withRetry) сравнивают его со строками 'POST', 'PUT' и другими.
+      // Fetch нормализует сам, но слои получают конфиг до fetch.
+      finalConfig = {
+        ...resolved,
+        method: (resolved.method ?? 'GET').toUpperCase() as HttpMethod,
+      };
+    } catch (e) {
+      throw new ApiError({
+        kind: 'unknown',
+        code: 'INVALID_REQUEST_CONFIG',
+        message: e instanceof Error ? e.message : String(e),
+        cause: e,
+      });
     }
-
-    // Нормализуем метод до верхнего регистра: слои (withIdempotency,
-    // withRetry) сравнивают его со строками 'POST', 'PUT' и другими.
-    // Fetch нормализует сам, но слои получают конфиг до fetch.
-    const finalConfig: ResolvedRequestConfig = {
-      ...resolved,
-      method: (resolved.method ?? 'GET').toUpperCase() as HttpMethod,
-    };
 
     // Ошибка из пользовательского слоя может быть не ApiError.
     // Контракт: всё, что выбрасывается наружу, нормализовано.
