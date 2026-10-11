@@ -178,7 +178,15 @@ export class RefreshManager {
         };
       }
 
-      this.circuit.open(circuitBreakerMs);
+      // Сетевой сбой или 5xx от auth-сервера - открываем
+      // предохранитель. Остальные ошибки (unknown, parse) скорее
+      // всего баг в реализации refresh, а не сбой сервера. Ложное
+      // открытие замаскировало бы реальную причину под
+      // REFRESH_CIRCUIT_OPEN на circuitBreakerMs миллисекунд.
+      if (err.kind === 'network' || err.isServerError) {
+        this.circuit.open(circuitBreakerMs);
+      }
+
       return { status: 'temporarily-failed', error: err };
     } finally {
       clearTimeout(timer);

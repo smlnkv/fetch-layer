@@ -570,6 +570,67 @@ describe('auth - circuit breaker', () => {
     expect(onCircuitOpen).toHaveBeenCalledTimes(1);
     expect(onCircuitClose).not.toHaveBeenCalled();
   });
+
+  it('не открывает circuit на unknown ошибке из provider.refresh', async () => {
+    let refreshCalls = 0;
+
+    const provider: SessionProvider = {
+      getAuthHeaders: () => ({ Authorization: 'Bearer token' }),
+      refresh: async () => {
+        refreshCalls++;
+        // Generic Error, не TypeError, не TimeoutError, не AbortError.
+        // Это баг в refresh, а не сбой auth-сервера. Ложное открытие
+        // замаскировало бы реальную причину под REFRESH_CIRCUIT_OPEN
+        // на circuitBreakerMs миллисекунд.
+        throw new Error('Bug in provider');
+      },
+    };
+
+    const mock = createMockFetch(() => ({ status: 401, body: { code: 'SESSION_INVALID' } }));
+    const client = createTestClient({
+      fetch: mock.fetch,
+      auth: { provider, circuitBreakerMs: 60_000 },
+    });
+
+    // Первый запрос: ошибка неизвестного типа, circuit не открыт.
+    await expect(client.get('/a')).rejects.toMatchObject({
+      kind: 'unknown',
+      message: 'Bug in provider',
+    });
+    expect(refreshCalls).toBe(1);
+
+    // Второй запрос: circuit не открыт, refresh вызывается снова.
+    await expect(client.get('/b')).rejects.toMatchObject({
+      kind: 'unknown',
+      message: 'Bug in provider',
+    });
+    expect(refreshCalls).toBe(2);
+  });
+
+  it('открывает circuit на network и 5xx из provider.refresh', async () => {
+    // TypeError из refresh классифицируется как network: реализация
+    // обычно делает fetch внутри. Circuit открывается как раньше.
+    let refreshCalls = 0;
+    const provider: SessionProvider = {
+      getAuthHeaders: () => ({ Authorization: 'Bearer token' }),
+      refresh: async () => {
+        refreshCalls++;
+        throw new TypeError('Failed to fetch');
+      },
+    };
+
+    const mock = createMockFetch(() => ({ status: 401, body: { code: 'SESSION_INVALID' } }));
+    const client = createTestClient({
+      fetch: mock.fetch,
+      auth: { provider, circuitBreakerMs: 60_000 },
+    });
+
+    await expect(client.get('/a')).rejects.toMatchObject({ kind: 'network' });
+    expect(refreshCalls).toBe(1);
+
+    await expect(client.get('/b')).rejects.toMatchObject({ code: 'REFRESH_CIRCUIT_OPEN' });
+    expect(refreshCalls).toBe(1);
+  });
 });
 
 describe('auth - cooldown', () => {
