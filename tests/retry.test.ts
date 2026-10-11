@@ -536,6 +536,22 @@ describe('retry - валидация конфигурации', () => {
     expect(() => withRetry({ maxAttempts: 0 })).toThrow(/maxAttempts/);
     expect(() => withRetry({ baseDelayMs: -1 })).toThrow(/baseDelayMs/);
     expect(() => withRetry({ jitterRatio: -0.1 })).toThrow(/jitterRatio/);
+    expect(() => withRetry({ jitterRatio: 1.5 })).toThrow(
+      /jitterRatio must be a number in \[0, 1\]/,
+    );
+    expect(() => withRetry({ jitterRatio: 2 })).toThrow(/jitterRatio must be a number in \[0, 1\]/);
+    expect(() => withRetry({ jitterRatio: NaN })).toThrow(
+      /jitterRatio must be a number in \[0, 1\]/,
+    );
+    expect(() => withRetry({ jitterRatio: Infinity })).toThrow(
+      /jitterRatio must be a number in \[0, 1\]/,
+    );
+  });
+
+  it('принимает граничные значения jitterRatio', () => {
+    expect(() => withRetry({ jitterRatio: 0 })).not.toThrow();
+    expect(() => withRetry({ jitterRatio: 1 })).not.toThrow();
+    expect(() => withRetry({ jitterRatio: 0.5 })).not.toThrow();
   });
 });
 

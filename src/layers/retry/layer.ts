@@ -44,7 +44,8 @@ export interface RetryOptions {
 
   /**
    * Разброс вокруг вычисленной задержки, по умолчанию 0.15 (+-15%).
-   * 0 отключает разброс. Не применяется к Retry-After.
+   * 0 отключает разброс, 1 даёт разброс +-100%. Не применяется
+   * к Retry-After. Значение должно быть в диапазоне [0, 1].
    */
   jitterRatio?: number;
 
@@ -164,7 +165,12 @@ export function withRetry(options: RetryOptions = {}): Layer {
   assertInteger(maxAttempts, 'withRetry: maxAttempts', 1);
   assertNonNegativeNumber(rawBaseDelayMs, 'withRetry: baseDelayMs');
   assertNonNegativeNumber(rawMaxDelayMs, 'withRetry: maxDelayMs');
-  assertNonNegativeNumber(jitterRatio, 'withRetry: jitterRatio');
+
+  if (!Number.isFinite(jitterRatio) || jitterRatio < 0 || jitterRatio > 1) {
+    throw new Error(
+      `withRetry: jitterRatio must be a number in [0, 1], got ${String(jitterRatio)}`,
+    );
+  }
 
   const baseDelayMs = clampDelay(rawBaseDelayMs, MIN_RETRY_MS);
   const maxDelayMs = Math.max(baseDelayMs, rawMaxDelayMs);
