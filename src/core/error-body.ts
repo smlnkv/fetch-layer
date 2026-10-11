@@ -1,25 +1,26 @@
 /**
- * Тип парсера тела ошибки. Принимает распарсенное тело ответа
- * (объект, массив, строку) или null, возвращает извлечённые поля.
- *
- * @public
+ * Контентные поля ошибки, извлекаемые из тела ответа. Структурные
+ * поля (kind, status, requestId, retryAfterMs) берёт транспорт,
+ * здесь их нет.
  */
-export type ErrorBodyParser = (raw: unknown) => ParsedErrorBody;
-
-/**
- * Результат парсинга тела ошибки. Все поля опциональны: парсер
- * может извлечь что угодно или ничего. Оригинальное тело в любом
- * случае доступно в ApiError.rawBody.
- *
- * @public
- */
-export interface ParsedErrorBody {
+type ErrorBodyContent = {
   code?: string;
   message?: string;
   fields?: Record<string, string>;
-  requestId?: string;
   details?: unknown;
-}
+};
+
+/**
+ * Парсер тела ошибки. Приложение передаёт функцию в
+ * ClientOptions.parseErrorBody, если сервер отдаёт ошибки
+ * в формате, отличном от плоского.
+ *
+ * Все поля опциональны: что не извлечено - остаётся undefined,
+ * полное тело доступно в ApiError.rawBody.
+ *
+ * @public
+ */
+export type ErrorBodyParser = (raw: unknown) => ErrorBodyContent;
 
 /**
  * Оставляет только строковые значения: контракт ApiError.fields
@@ -45,13 +46,13 @@ export function parseFields(raw: unknown): Record<string, string> | undefined {
 }
 
 /**
- * Парсер по умолчанию. Понимает плоский JSON-объект
- * { code, message, fields, requestId }, plain-text строку как
- * message и всё остальное как пустой результат.
+ * Дефолтный парсер. Извлекает code, message, fields из плоского
+ * JSON-объекта; plain-text строка становится message. Незнакомые
+ * поля остаются undefined, полное тело - в rawBody.
  *
- * @public
+ * @internal
  */
-export function parseFlatErrorBody(raw: unknown): ParsedErrorBody {
+export function parseFlatErrorBody(raw: unknown): ErrorBodyContent {
   if (typeof raw === 'string' && raw.length > 0) {
     return { message: raw };
   }
@@ -62,7 +63,6 @@ export function parseFlatErrorBody(raw: unknown): ParsedErrorBody {
       code: typeof b.code === 'string' ? b.code : undefined,
       message: typeof b.message === 'string' ? b.message : undefined,
       fields: parseFields(b.fields),
-      requestId: typeof b.requestId === 'string' ? b.requestId : undefined,
     };
   }
 

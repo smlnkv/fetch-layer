@@ -54,20 +54,9 @@ export interface TransportOptions {
 
   /**
    * Кастомный парсер тела ошибки. По умолчанию используется
-   * плоский формат: { code, message, fields, requestId } или
-   * plain-text строка как message.
-   *
-   * Для встроенных форматов (content, error, rfc7807) подключите
-   * их из fetch-layer/error-body:
-   *
-   * ```ts
-   * import { errorBodyParsers } from 'fetch-layer/error-body';
-   *
-   * const client = createClient({
-   *   baseUrl: '/api',
-   *   parseErrorBody: errorBodyParsers.rfc7807,
-   * });
-   * ```
+   * плоский формат: { code, message, fields } или plain-text
+   * строка как message. Для нестандартных форматов приложение
+   * передаёт свой парсер.
    */
   parseErrorBody?: ErrorBodyParser;
 }
@@ -189,7 +178,7 @@ export function createBaseRequest(options: TransportOptions): RequestFn {
           code: parsed.code ?? `HTTP_${response.status}`,
           message: parsed.message ?? `HTTP ${response.status}`,
           fields: parsed.fields,
-          requestId: parsed.requestId ?? meta.requestId,
+          requestId: meta.requestId,
           retryAfterMs: meta.retryAfterMs,
           rawBody,
           details: parsed.details,
@@ -197,8 +186,10 @@ export function createBaseRequest(options: TransportOptions): RequestFn {
         });
       }
 
-      // Тело может отсутствовать и при 2xx: HEAD с 200, DELETE без тела.
-      if (!response.body) {
+      // HEAD и OPTIONS возвращают только метаданные: тело, если
+      // сервер его прислал, отбрасывается. Тип ResponseWithMeta<undefined>
+      // у head/options в этом случае честный.
+      if (!response.body || method === 'HEAD' || method === 'OPTIONS') {
         if (includeMeta) {
           return { data: undefined, meta } as unknown as T;
         }

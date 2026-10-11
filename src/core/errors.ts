@@ -85,9 +85,8 @@ export class ApiError extends Error {
   readonly rawBody?: unknown;
 
   /**
-   * Структурированные детали, извлечённые парсером. Заполняется,
-   * когда включён errorBodyFormat (например, для RFC 7807 - поля
-   * instance и status). Для плоского формата остаётся undefined.
+   * Структурированные детали, извлечённые парсером. Парсер сам
+   * решает, что сюда положить. Для плоского формата undefined.
    */
   readonly details?: unknown;
 
