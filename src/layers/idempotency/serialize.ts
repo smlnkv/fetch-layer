@@ -4,7 +4,8 @@ import { classifyBody, getTypeName, isSerializableKind } from '../../shared/clas
 /**
  * Стабильная сериализация значения. Ключи объектов сортируются
  * в алфавитном порядке, поэтому результат не зависит от порядка
- * вставки. В остальном поведение совпадает с JSON.stringify.
+ * вставки. В остальном поведение совпадает с JSON.stringify,
+ * включая обработку toJSON, возвращающего undefined.
  *
  * Правило допустимых типов то же, что у prepareBody в транспорте:
  * значение должно быть сериализуемо в JSON как есть и после вызова
@@ -21,7 +22,7 @@ import { classifyBody, getTypeName, isSerializableKind } from '../../shared/clas
  */
 export function stableSerialize(value: unknown): string {
   try {
-    return serialize(value, new WeakSet<object>());
+    return serialize(value, new WeakSet<object>()) ?? 'null';
   } catch (e) {
     if (e instanceof TypeError) {
       throw new ApiError({
@@ -44,8 +45,13 @@ export function stableSerialize(value: unknown): string {
  * Объект добавляется в seen до обхода полей и удаляется после,
  * поэтому "посещён" здесь означает "находится в стеке рекурсии
  * прямо сейчас".
+ *
+ * Возвращает undefined для значений, которые JSON.stringify
+ * пропускает: undefined, функции, Symbol. Родитель решает, как
+ * поступить - пропустить свойство объекта или записать null
+ * в массиве.
  */
-function serialize(value: unknown, seen: WeakSet<object>): string {
+function serialize(value: unknown, seen: WeakSet<object>): string | undefined {
   // Проверка до toJSON: контракт "несериализуемые типы отклоняются"
   // не должен обходиться через пользовательский toJSON.
   const kind = classifyBody(value);
@@ -71,8 +77,14 @@ function serialize(value: unknown, seen: WeakSet<object>): string {
     }
   }
 
+  // Значения, которые JSON.stringify пропускает. Родитель решает,
+  // как поступить: свойство объекта опускается, элемент массива
+  // становится null.
+  if (value === undefined) return undefined;
+  if (typeof value === 'function' || typeof value === 'symbol') return undefined;
+
   if (value === null || typeof value !== 'object') {
-    return JSON.stringify(value) ?? 'null';
+    return JSON.stringify(value);
   }
 
   const obj = value as object;
@@ -86,10 +98,7 @@ function serialize(value: unknown, seen: WeakSet<object>): string {
       const parts: string[] = new Array(obj.length);
       for (let i = 0; i < obj.length; i++) {
         const item = obj[i];
-        parts[i] =
-          item === undefined || typeof item === 'function' || typeof item === 'symbol'
-            ? 'null'
-            : serialize(item, seen);
+        parts[i] = serialize(item, seen) ?? 'null';
       }
       return '[' + parts.join(',') + ']';
     }
@@ -98,11 +107,9 @@ function serialize(value: unknown, seen: WeakSet<object>): string {
     const keys = Object.keys(record).sort();
     const parts: string[] = [];
     for (const key of keys) {
-      const v = record[key];
-      if (v === undefined || typeof v === 'function' || typeof v === 'symbol') {
-        continue;
-      }
-      parts.push(JSON.stringify(key) + ':' + serialize(v, seen));
+      const serialized = serialize(record[key], seen);
+      if (serialized === undefined) continue;
+      parts.push(JSON.stringify(key) + ':' + serialized);
     }
     return '{' + parts.join(',') + '}';
   } finally {

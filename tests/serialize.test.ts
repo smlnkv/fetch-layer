@@ -74,6 +74,44 @@ describe('stableSerialize - toJSON', () => {
     expect(stableSerialize({ x: { toJSON: () => [1, 2] } })).toBe('{"x":[1,2]}');
   });
 
+  it('toJSON, вернувший undefined: свойство опускается, как в JSON.stringify', () => {
+    // JSON.stringify({ a: { toJSON: () => undefined } }) === '{}'
+    expect(stableSerialize({ a: { toJSON: () => undefined } })).toBe('{}');
+    expect(stableSerialize({ a: { toJSON: () => undefined }, b: 1 })).toBe('{"b":1}');
+    expect(stableSerialize({ a: 1, b: { toJSON: () => undefined }, c: 3 })).toBe('{"a":1,"c":3}');
+
+    // В массиве JSON.stringify превращает undefined в null:
+    // JSON.stringify([{ toJSON: () => undefined }]) === '[null]'
+    expect(stableSerialize([{ toJSON: () => undefined }])).toBe('[null]');
+    expect(stableSerialize([1, { toJSON: () => undefined }, 2])).toBe('[1,null,2]');
+
+    // Вложенные цепочки: toJSON верхнего уровня возвращает объект,
+    // в котором поле-свойство toJSON вернуло undefined.
+    expect(
+      stableSerialize({
+        nested: { inner: { toJSON: () => undefined }, keep: 'x' },
+      }),
+    ).toBe('{"nested":{"keep":"x"}}');
+  });
+
+  it('расхождение с JSON.stringify устранено: одинаковые значения дают одинаковый результат', () => {
+    const cases: unknown[] = [
+      { a: null },
+      { a: { toJSON: () => undefined } },
+      { a: { toJSON: () => undefined }, b: 1 },
+      { a: 1, b: { toJSON: () => undefined }, c: 3 },
+      [{ toJSON: () => undefined }],
+      [1, { toJSON: () => undefined }, 2],
+      { nested: { inner: { toJSON: () => undefined }, keep: 'x' } },
+      { x: { toJSON: () => null } },
+    ];
+
+    for (const value of cases) {
+      const expected = JSON.stringify(value) ?? 'null';
+      expect(stableSerialize(value)).toBe(expected);
+    }
+  });
+
   it('toJSON, вернувший несериализуемый тип, отклоняется; сообщение называет тип', () => {
     // Правило допустимых типов общее с prepareBody в транспорте.
     // Без повторной проверки после toJSON значение прошло бы через
