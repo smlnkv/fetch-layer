@@ -6,7 +6,6 @@ import globals from 'globals';
 import prettierConfig from 'eslint-config-prettier';
 
 export default [
-  // Что игнорировать
   {
     ignores: [
       '**/node_modules/**',
@@ -20,10 +19,8 @@ export default [
     ],
   },
 
-  // Базовые рекомендованные правила ESLint
   js.configs.recommended,
 
-  // TypeScript + type-aware linting
   {
     files: ['**/*.ts'],
     languageOptions: {
@@ -45,29 +42,23 @@ export default [
       'import-x': importX,
     },
     rules: {
-      // Базовые правила TypeScript
       ...tsPlugin.configs.recommended.rules,
 
-      // Type-aware: ловит промисы без await/.catch()
       '@typescript-eslint/no-floating-promises': 'error',
       '@typescript-eslint/no-misused-promises': 'error',
 
-      // Единый стиль импорта типов
       '@typescript-eslint/consistent-type-imports': [
         'error',
         { prefer: 'type-imports', fixStyle: 'inline-type-imports' },
       ],
 
-      // Разрешаем `any` с предупреждением
       '@typescript-eslint/no-explicit-any': 'warn',
 
-      // Неиспользуемые переменные с префиксом `_` игнорируются
       '@typescript-eslint/no-unused-vars': [
         'warn',
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
       ],
 
-      // Только два правила из import-x — без резолвера
       'import-x/no-cycle': 'error',
       'import-x/order': [
         'error',
@@ -78,13 +69,11 @@ export default [
         },
       ],
 
-      // Общие правила
       'no-console': ['warn', { allow: ['warn', 'error', 'info'] }],
       'prefer-const': 'error',
       'no-var': 'error',
     },
   },
 
-  // Отключаем правила ESLint, конфликтующие с Prettier
   prettierConfig,
 ];
