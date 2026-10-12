@@ -9,7 +9,7 @@ HTTP-клиент, который собирается из слоёв. Кажд
 - `withAuth` - обновление токена при 401 с одним refresh на все параллельные запросы, circuit breaker при недоступном refresh;
 - `withRetry` - повторы 5xx и сетевых ошибок с учётом `Retry-After`;
 - `withIdempotency` - один `Idempotency-Key` на всю операцию, включая повторы;
-- `ApiError` - единый формат ошибок с готовыми `code`, `fields`, `requestId`.
+- `ApiError` - общий конверт: структурные поля всегда на месте, контентные из тела или из `parseErrorBody`.
 
 Ноль зависимостей, tree-shaking.
 
@@ -26,7 +26,7 @@ HTTP-клиент, который собирается из слоёв. Кажд
 
 ## Кому подойдёт
 
-- **SPA с авторизацией.** Пять параллельных запросов получают 401 одновременно. Без single-flight каждый пойдёт за новым токеном, часть запросов уйдёт с устаревшим и снова получит 401. `withAuth` запускает один refresh на все ожидающие запросы.
+- **SPA с авторизацией.** Несколько запросов уходят одновременно и получают 401. `withAuth` запускает один refresh на все и повторяет каждый с новым токеном.
 
 - **API с мутирующими операциями.** Заказы, платежи, бронирования. Хочется повторять 5xx и таймауты, но POST с созданием заказа создаст два заказа. `withIdempotency` генерирует ключ один раз и сохраняет его до подтверждения сервером.
 
@@ -54,7 +54,9 @@ HTTP-клиент, который собирается из слоёв. Кажд
 
 У каждого бэкенда свой формат ошибок. Один отдаёт `{ code, message }`, другой `{ error: { code } }`, третий RFC 7807. Разбор повторяется в каждом месте, где обрабатывается ошибка, и в итоге размазан по всему приложению.
 
-Библиотека приводит все ошибки к `ApiError`. Поля одинаковые независимо от того, что вернул сервер: `code`, `message`, `fields`, `requestId`, `isRetryable`, `isCancelled`.
+Библиотека делит поля ошибки на два слоя. Структурный - одинаковый для всех серверов: `kind`, `status`, `isRetryable`, `isCancelled`, `isUncertain`, `requestId` (из заголовка `X-Request-Id`), `retryAfterMs`. Контентный - из тела ответа: `code`, `message`, `fields`, `details`. По умолчанию клиент понимает плоский формат `{ code, message, fields }` и plain-text. Для остальных форматов (Fastify, RFC 7807, DRF, Laravel, `{ error: { code } }`) приложение передаёт свою функцию разбора через `parseErrorBody`.
+
+Полное тело ответа всегда доступно в `err.rawBody`, даже если формат не распознан.
 
 ### Обновление токена временно недоступно
 
@@ -64,13 +66,13 @@ HTTP-клиент, который собирается из слоёв. Кажд
 
 ## Возможности
 
-- **Авторизация.** `withAuth` работает с любым `SessionProvider` - три метода: `getAuthHeaders`, `refresh`, `clear`. Три состояния refresh (`success`, `definitely-failed`, `temporarily-failed`) дают приложению контроль: разлогинить пользователя или повторить позже. Circuit breaker с настраиваемым `circuitBreakerMs` и `refreshTimeoutMs`. `resetRefreshCircuit` для ручного сброса.
+- **Авторизация.** `withAuth` работает с любым `SessionProvider` - три метода: `getAuthHeaders`, `refresh`, `clear`. Три состояния refresh (`success`, `definitely-failed`, `temporarily-failed`) дают приложению контроль: разлогинить пользователя или повторить позже. Circuit breaker с настраиваемым `circuitBreakerMs` и `refreshTimeoutMs`, открывается только на сеть, таймаут и 5xx, не на ошибки в `refresh`. `resetRefreshCircuit` для ручного сброса.
 
 - **Идемпотентность.** `withIdempotency` хранит ключ в `sessionStorage`, `localStorage` или памяти. Для кастомного хранилища - интерфейс `IdempotencySource` из двух методов и утилита `stableSerialize` для отпечатка тела. `maxEntries` ограничивает размер хранилища, вытеснение - по времени использования.
 
 - **Повторы запросов.** `withRetry` настраивается: `maxAttempts`, `baseDelayMs`, `maxDelayMs`, `jitterRatio`, `retryOnNetwork`, `retryOnTimeout`. Свои политики через `shouldRetry`, `computeDelay`, `onBeforeRetry`. `Retry-After` от сервера имеет приоритет над вычисленной задержкой.
 
-- **Ошибки.** Единый `ApiError` с геттерами `isRetryable`, `isCancelled`, `isAuthError`, `isUncertain` и другими. `err.fields` - готовая структура `Record<string, string>` для формы. Три встроенных парсера в `fetch-layer/error-body` для `content`, `error`, RFC 7807. Свой парсер через `parseErrorBody`.
+- **Ошибки.** `ApiError` с геттерами `isRetryable`, `isCancelled`, `isAuthError`, `isUncertain` и другими. `err.fields` - готовая структура `Record<string, string>` для формы, если сервер отдаёт плоский формат. `err.rawBody` - оригинальное тело ответа для всего остального. Свой разбор через `parseErrorBody`.
 
 - **Транспорт.** Валидация `baseUrl`, `timeoutMs`, `fetch` и порядка слоёв при создании клиента. Заголовки принимаются как `Record`, `Headers` или массив пар. `defaultHeaders` для сквозных заголовков. Per-request `timeoutMs` и `signal`. `requestWithMeta` для HTTP-метаданных. `fetchOptions` для остальных параметров `fetch`.
 
@@ -124,7 +126,7 @@ const client = createClient({
 - `withRetry` повторяет запрос при 5xx, сети и таймаутах, но не трогает ключ.
 - `withAuth` добавляет заголовки авторизации и обновляет токен при 401.
 
-Порядок нельзя переставить произвольно: библиотека проверяет его при создании клиента. Если поменять `withIdempotency` и `withRetry` местами, ключ будет генерироваться заново на каждом повторе - это ошибка. `createClient` выбросит исключение с указанием, какой слой нарушил правило.
+Порядок нельзя переставить произвольно - библиотека проверяет его при создании клиента. Если поменять `withIdempotency` и `withRetry` местами, ключ будет генерироваться заново на каждом повторе - это ошибка. `createClient` выбросит исключение с указанием, какой слой нарушил правило.
 
 Если слои не нужны, `createClient({ baseUrl: "/api" })` даёт чистый HTTP-клиент без авторизации, повторов и идемпотентности.
 
@@ -144,13 +146,12 @@ const client = createClient({
 
 | Модуль                    | Что экспортирует                                                                                          |
 | ------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `fetch-layer`             | `createClient`, `ApiError`, `toApiError`, хранилища и публичные типы                                      |
+| `fetch-layer`             | `createClient`, `ApiError`, `toApiError`, `ErrorBodyParser`, хранилища и публичные типы                   |
 | `fetch-layer/layers`      | Фабрики всех встроенных слоёв и источники ключей идемпотентности                                          |
 | `fetch-layer/auth`        | Типы `SessionProvider`, `RefreshResult`, `SessionExpiredReason`, `resetRefreshCircuit`                    |
 | `fetch-layer/idempotency` | `IdempotencySource`, `IdempotencyContext`, `IdempotencyOutcome`, `createSessionSource`, `stableSerialize` |
 | `fetch-layer/retry`       | Только `withRetry` и его опции                                                                            |
 | `fetch-layer/storage`     | `StorageLike`, `createMemoryStorage`, `fromWebStorage`                                                    |
-| `fetch-layer/error-body`  | Парсеры `errorBodyParsers` и типы `ErrorBodyParser`, `ParsedErrorBody`                                    |
 
 ### Прямые импорты для минимального размера
 
@@ -178,7 +179,7 @@ import { withIdempotency, sessionStorageSource } from 'fetch-layer/idempotency';
 
 ### Почему слоистая архитектура вместо хуков и интерцепторов
 
-Слой — это декоратор: он получает `next` и возвращает свою версию. Слой управляет вызовом: может вызвать `next` несколько раз, перехватить ошибку и вызвать снова с другими данными, выполнить код до и после. Колбэк на это не способен — он получает данные и возвращает их же.
+Слой - это декоратор: он получает `next` и возвращает свою версию. Слой управляет вызовом: может вызвать `next` несколько раз, перехватить ошибку и вызвать снова с другими данными, выполнить код до и после. Колбэк на это не способен - он получает данные и возвращает их же.
 
 Хук в ky и ofetch и интерцептор в axios - это колбэки, которые вызываются в фиксированной точке: до запроса или после ответа. Каждый получает данные и возвращает их же.
 

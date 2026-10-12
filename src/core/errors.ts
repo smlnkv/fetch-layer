@@ -17,7 +17,8 @@
  *   (IDEMPOTENCY_KEY_INVALID);
  * - storage: не удалось сохранить ключ идемпотентности в хранилище;
  * - unknown: ошибка, которую не удалось классифицировать (включая
- *   AUTH_PROVIDER_ERROR и REFRESH_CIRCUIT_OPEN).
+ *   AUTH_PROVIDER_ERROR, REFRESH_CIRCUIT_OPEN и
+ *   INVALID_REQUEST_CONFIG).
  */
 export type ApiErrorKind =
   'network' | 'timeout' | 'http' | 'parse' | 'abort' | 'serialize' | 'storage' | 'unknown';
@@ -42,7 +43,9 @@ const AUTH_ERROR_CODES = new Set([
  * - AUTH_PROVIDER_ERROR, REFRESH_TIMEOUT, REFRESH_CIRCUIT_OPEN -
  *   авторизация;
  * - IDEMPOTENCY_STORAGE_ERROR, IDEMPOTENCY_KEY_INVALID -
- *   идемпотентность.
+ *   идемпотентность;
+ * - INVALID_REQUEST_CONFIG - клиент: конфиг запроса не прошёл
+ *   валидацию (пустой path, timeoutMs меньше 100).
  *
  * Любые другие коды приходят от сервера в теле ответа.
  */
