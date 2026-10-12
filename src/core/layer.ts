@@ -102,6 +102,13 @@ export function validateLayerOrder(layers: readonly Layer[]): void {
 
     if (layer.stage === undefined) continue;
 
+    if (!Number.isFinite(layer.stage)) {
+      throw new Error(
+        `createClient: layer "${layer.name}" has invalid stage ${String(layer.stage)}. ` +
+          `Stage must be a finite number.`,
+      );
+    }
+
     if (layer.stage > prevStage) {
       throw new Error(
         `createClient: layer "${layer.name}" (stage ${layer.stage}) breaks the order ` +

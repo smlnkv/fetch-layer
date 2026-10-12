@@ -80,6 +80,34 @@ describe('validateLayerOrder - порядок stage', () => {
       }),
     ).not.toThrow();
   });
+
+  it('отклоняет NaN, Infinity и -Infinity в stage', () => {
+    const withNaN: Layer = {
+      name: 'withNaN',
+      stage: NaN,
+      wrap: (next) => ({ fn: next }),
+    };
+    const withInfinity: Layer = {
+      name: 'withInfinity',
+      stage: Infinity,
+      wrap: (next) => ({ fn: next }),
+    };
+    const withNegativeInfinity: Layer = {
+      name: 'withNegativeInfinity',
+      stage: -Infinity,
+      wrap: (next) => ({ fn: next }),
+    };
+
+    expect(() => createClient({ baseUrl: '/api', layers: [withNaN] })).toThrow(
+      /withNaN.*invalid stage NaN/,
+    );
+    expect(() => createClient({ baseUrl: '/api', layers: [withInfinity] })).toThrow(
+      /withInfinity.*invalid stage Infinity/,
+    );
+    expect(() => createClient({ baseUrl: '/api', layers: [withNegativeInfinity] })).toThrow(
+      /withNegativeInfinity.*invalid stage -Infinity/,
+    );
+  });
 });
 
 describe('validateLayerOrder - дубликаты', () => {
