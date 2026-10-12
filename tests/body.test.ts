@@ -169,9 +169,9 @@ describe('parseResponse', () => {
         code: 'PARSE_ERROR',
         status: 200,
       });
-      // Ответ 200 OK получен полностью: состояние операции на сервере
-      // известно, повтор безопасен.
-      expect(err.isUncertain).toBe(false);
+      // Ответ 200 получен, тело не распарсено. Применил ли сервер
+      // операцию - неизвестно, поэтому isUncertain: true.
+      expect(err.isUncertain).toBe(true);
     }
   });
 

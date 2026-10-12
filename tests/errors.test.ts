@@ -131,8 +131,9 @@ describe('toApiError', () => {
     const err = toApiError(new SyntaxError('Unexpected token'));
     expect(err.kind).toBe('parse');
     expect(err.code).toBe('PARSE_ERROR');
-    // Ответ получен полностью: состояние операции на сервере
-    // известно, повтор безопасен.
+    // Без HTTP-статуса неизвестно, был ли ответ. Консервативный
+    // дефолт - false. Транспорт для ошибок разбора ставит
+    // isUncertain по статусу ответа.
     expect(err.isUncertain).toBe(false);
   });
 

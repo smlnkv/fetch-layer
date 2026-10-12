@@ -142,7 +142,10 @@ function prepareJsonBody(value: unknown): PreparedBody {
  * до вызова этой функции.
  *
  * @throws ApiError с кодом PARSE_ERROR, если тело не удалось
- *   разобрать. Например, сервер вернул HTML, а запрос ожидал JSON.
+ *   разобрать. Для 2xx и 5xx ошибка помечается isUncertain: true -
+ *   ответ получен, но его содержимое неизвестно, и состояние
+ *   операции на сервере тоже неизвестно. Для 4xx сервер явно
+ *   отверг операцию, isUncertain: false.
  */
 export async function parseResponse(
   response: Response,
@@ -173,6 +176,7 @@ export async function parseResponse(
         ? `Failed to parse response body as ${responseType} (content-type: ${contentType})`
         : `Failed to parse response body as ${responseType}`,
       status: response.status,
+      isUncertain: response.status < 400 || response.status >= 500,
       cause: e,
     });
   }
