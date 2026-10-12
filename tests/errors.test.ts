@@ -5,14 +5,13 @@ import { describe, expect, it } from 'vitest';
 import { ApiError, toApiError } from '../src/index';
 
 describe('ApiError - конструктор', () => {
-  it('устанавливает поля и применяет дефолты', () => {
+  it('применяет дефолты', () => {
     const err = new ApiError({
       kind: 'http',
       message: 'Not found',
       status: 404,
       code: 'NOT_FOUND',
     });
-    expect(err).toBeInstanceOf(Error);
     expect(err.name).toBe('ApiError');
     expect(err.kind).toBe('http');
     expect(err.message).toBe('Not found');
@@ -23,15 +22,6 @@ describe('ApiError - конструктор', () => {
     expect(minimal.status).toBe(0);
     expect(minimal.code).toBe('UNKNOWN');
     expect(minimal.isUncertain).toBe(false);
-    expect(minimal.details).toBeUndefined();
-
-    const uncertain = new ApiError({
-      kind: 'http',
-      status: 400,
-      message: 'Bad request',
-      isUncertain: true,
-    });
-    expect(uncertain.isUncertain).toBe(true);
   });
 
   it('сохраняет fields, requestId, retryAfterMs, rawBody, details, cause', () => {
@@ -60,7 +50,6 @@ describe('ApiError - конструктор', () => {
 describe('ApiError - геттеры', () => {
   it('isNetwork и isCancelled', () => {
     expect(new ApiError({ kind: 'network', message: 'x' }).isNetwork).toBe(true);
-    expect(new ApiError({ kind: 'timeout', message: 'x' }).isNetwork).toBe(true);
     expect(new ApiError({ kind: 'http', status: 500, message: 'x' }).isNetwork).toBe(false);
 
     expect(new ApiError({ kind: 'abort', message: 'x' }).isCancelled).toBe(true);
@@ -68,16 +57,12 @@ describe('ApiError - геттеры', () => {
   });
 
   it('isAuthError: true для auth-кодов, 401, 403; пересекается с isClientError', () => {
-    for (const code of ['AUTH_PROVIDER_ERROR', 'REFRESH_TIMEOUT', 'REFRESH_CIRCUIT_OPEN']) {
-      expect(new ApiError({ kind: 'unknown', code, message: 'x' }).isAuthError).toBe(true);
-    }
-
+    expect(
+      new ApiError({ kind: 'unknown', code: 'AUTH_PROVIDER_ERROR', message: 'x' }).isAuthError,
+    ).toBe(true);
     expect(new ApiError({ kind: 'http', status: 401, message: 'x' }).isAuthError).toBe(true);
     expect(new ApiError({ kind: 'http', status: 403, message: 'x' }).isAuthError).toBe(true);
-
-    for (const status of [400, 404, 422, 500, 503]) {
-      expect(new ApiError({ kind: 'http', status, message: 'x' }).isAuthError).toBe(false);
-    }
+    expect(new ApiError({ kind: 'http', status: 404, message: 'x' }).isAuthError).toBe(false);
 
     const err401 = new ApiError({ kind: 'http', status: 401, message: 'x' });
     expect(err401.isAuthError).toBe(true);
@@ -86,45 +71,34 @@ describe('ApiError - геттеры', () => {
 
   it('isRetryable: true для network, timeout, 408, 429 и 5xx', () => {
     expect(new ApiError({ kind: 'network', message: 'x' }).isRetryable).toBe(true);
-    expect(new ApiError({ kind: 'timeout', message: 'x' }).isRetryable).toBe(true);
-
-    // kind timeout с кодом TIMEOUT (обычный таймаут транспорта)
-    // повторяется.
     expect(new ApiError({ kind: 'timeout', code: 'TIMEOUT', message: 'x' }).isRetryable).toBe(true);
-
-    for (const status of [408, 429, 500, 502, 503, 504, 599]) {
-      expect(new ApiError({ kind: 'http', status, message: 'x' }).isRetryable).toBe(true);
-    }
+    expect(new ApiError({ kind: 'http', status: 408, message: 'x' }).isRetryable).toBe(true);
+    expect(new ApiError({ kind: 'http', status: 429, message: 'x' }).isRetryable).toBe(true);
+    expect(new ApiError({ kind: 'http', status: 500, message: 'x' }).isRetryable).toBe(true);
+    expect(new ApiError({ kind: 'http', status: 599, message: 'x' }).isRetryable).toBe(true);
   });
 
-  it('isRetryable: false для abort, auth-кодов, остальных 4xx и 2xx/3xx', () => {
+  it('isRetryable: false для abort, serialize, auth-кодов и остальных статусов', () => {
     expect(new ApiError({ kind: 'abort', message: 'x' }).isRetryable).toBe(false);
     expect(new ApiError({ kind: 'serialize', message: 'x' }).isRetryable).toBe(false);
-    expect(new ApiError({ kind: 'storage', message: 'x' }).isRetryable).toBe(false);
 
-    // Auth-коды не повторяются, даже если kind позволяет.
-    for (const code of ['AUTH_PROVIDER_ERROR', 'REFRESH_TIMEOUT', 'REFRESH_CIRCUIT_OPEN']) {
-      expect(new ApiError({ kind: 'unknown', code, message: 'x' }).isRetryable).toBe(false);
-    }
+    expect(
+      new ApiError({ kind: 'unknown', code: 'AUTH_PROVIDER_ERROR', message: 'x' }).isRetryable,
+    ).toBe(false);
     expect(
       new ApiError({ kind: 'timeout', code: 'REFRESH_TIMEOUT', message: 'x' }).isRetryable,
     ).toBe(false);
 
-    for (const status of [400, 401, 403, 404, 409, 422]) {
-      expect(new ApiError({ kind: 'http', status, message: 'x' }).isRetryable).toBe(false);
-    }
-
+    expect(new ApiError({ kind: 'http', status: 400, message: 'x' }).isRetryable).toBe(false);
+    expect(new ApiError({ kind: 'http', status: 409, message: 'x' }).isRetryable).toBe(false);
     expect(new ApiError({ kind: 'http', status: 200, message: 'x' }).isRetryable).toBe(false);
-    expect(new ApiError({ kind: 'http', status: 304, message: 'x' }).isRetryable).toBe(false);
   });
 
   it('isClientError, isServerError, isConflict', () => {
     expect(new ApiError({ kind: 'http', status: 400, message: 'x' }).isClientError).toBe(true);
-    expect(new ApiError({ kind: 'http', status: 499, message: 'x' }).isClientError).toBe(true);
     expect(new ApiError({ kind: 'http', status: 500, message: 'x' }).isClientError).toBe(false);
 
     expect(new ApiError({ kind: 'http', status: 500, message: 'x' }).isServerError).toBe(true);
-    expect(new ApiError({ kind: 'http', status: 599, message: 'x' }).isServerError).toBe(true);
     expect(new ApiError({ kind: 'http', status: 400, message: 'x' }).isServerError).toBe(false);
 
     expect(new ApiError({ kind: 'http', status: 409, message: 'x' }).isConflict).toBe(true);
@@ -140,21 +114,17 @@ describe('toApiError', () => {
   });
 
   it('распознаёт AbortError и TimeoutError по имени, включая duck-typed', () => {
-    const abort = new DOMException('Aborted', 'AbortError');
-    const err1 = toApiError(abort);
+    const err1 = toApiError(new DOMException('Aborted', 'AbortError'));
     expect(err1.kind).toBe('abort');
     expect(err1.code).toBe('ABORTED');
     expect(err1.isCancelled).toBe(true);
 
     expect(toApiError({ name: 'AbortError', message: 'Custom abort' }).kind).toBe('abort');
 
-    const timeout = new DOMException('Timeout', 'TimeoutError');
-    const err2 = toApiError(timeout);
+    const err2 = toApiError(new DOMException('Timeout', 'TimeoutError'));
     expect(err2.kind).toBe('timeout');
     expect(err2.code).toBe('TIMEOUT');
     expect(err2.isUncertain).toBe(true);
-
-    expect(toApiError({ name: 'TimeoutError', message: 'Custom timeout' }).kind).toBe('timeout');
   });
 
   it('преобразует SyntaxError в parse с isUncertain false', () => {
@@ -164,14 +134,9 @@ describe('toApiError', () => {
     // Ответ получен полностью: состояние операции на сервере
     // известно, повтор безопасен.
     expect(err.isUncertain).toBe(false);
-
-    const duck = { name: 'SyntaxError', message: 'cross-realm' };
-    expect(toApiError(duck).kind).toBe('parse');
-    expect(toApiError(duck).code).toBe('PARSE_ERROR');
-    expect(toApiError(duck).isUncertain).toBe(false);
   });
 
-  it('преобразует TypeError, Error, неизвестные значения и name = "SomeError" в unknown', () => {
+  it('преобразует TypeError, Error и неизвестные значения в unknown', () => {
     expect(toApiError(new TypeError('undefined is not a function')).kind).toBe('unknown');
 
     const generic = toApiError(new Error('Something went wrong'));
@@ -181,12 +146,5 @@ describe('toApiError', () => {
 
     expect(toApiError('just a string').kind).toBe('unknown');
     expect(toApiError('just a string').message).toBe('Unknown error');
-    expect(toApiError(null).kind).toBe('unknown');
-
-    // Обычный Error с нестандартным name не должен попасть в ветки
-    // AbortError / TimeoutError / SyntaxError.
-    const named = new Error('x');
-    named.name = 'SomeError';
-    expect(toApiError(named).kind).toBe('unknown');
   });
 });

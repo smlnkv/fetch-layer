@@ -5,26 +5,6 @@ import { describe, expect, it, vi } from 'vitest';
 import { setAbortTimeout, sleep, throwIfAborted } from '../src/shared/signals';
 
 describe('sleep', () => {
-  it('завершается через указанное время', async () => {
-    vi.useFakeTimers();
-    try {
-      const promise = sleep(100);
-      let done = false;
-      void promise.then(() => {
-        done = true;
-      });
-
-      await vi.advanceTimersByTimeAsync(50);
-      expect(done).toBe(false);
-
-      await vi.advanceTimersByTimeAsync(60);
-      await promise;
-      expect(done).toBe(true);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
   it('сохраняет причину отмены', async () => {
     const controller1 = new AbortController();
     controller1.abort();

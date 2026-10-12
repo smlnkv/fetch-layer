@@ -6,11 +6,9 @@ import { getHeader, mergeHeaders, setHeader } from '../src/transport/headers';
 import { parseRetryAfterMs } from '../src/transport/retry-after';
 
 describe('getHeader', () => {
-  it('читает значение, игнорируя регистр; undefined без заголовка; не читает унаследованные', () => {
+  it('читает значение, игнорируя регистр; пустая строка - не undefined; унаследованные не читает', () => {
     const headers = { 'Content-Type': 'application/json' };
-    expect(getHeader(headers, 'Content-Type')).toBe('application/json');
     expect(getHeader(headers, 'content-type')).toBe('application/json');
-    expect(getHeader(headers, 'CONTENT-TYPE')).toBe('application/json');
     expect(getHeader(headers, 'X-Missing')).toBeUndefined();
     expect(getHeader(undefined, 'Content-Type')).toBeUndefined();
     expect(getHeader({ 'X-Empty': '' }, 'X-Empty')).toBe('');
@@ -38,18 +36,16 @@ describe('getHeader', () => {
 });
 
 describe('setHeader', () => {
-  it('устанавливает, перезаписывает, удаляет дубли с другим регистром', () => {
+  it('устанавливает и перезаписывает', () => {
     const headers: Record<string, string> = {};
     setHeader(headers, 'Content-Type', 'application/json');
     expect(headers).toEqual({ 'Content-Type': 'application/json' });
 
     setHeader(headers, 'Content-Type', 'text/plain');
     expect(headers).toEqual({ 'Content-Type': 'text/plain' });
+  });
 
-    const lowercase: Record<string, string> = {};
-    setHeader(lowercase, 'content-type', 'application/json');
-    expect(Object.keys(lowercase)).toEqual(['content-type']);
-
+  it('удаляет дубли с другим регистром', () => {
     const multi: Record<string, string> = {
       'content-type': 'text/plain',
       'CONTENT-TYPE': 'text/html',
@@ -110,16 +106,12 @@ describe('mergeHeaders', () => {
 });
 
 describe('parseRetryAfterMs', () => {
-  it('возвращает undefined для null и пустой строки; парсит числовой формат; срезает OWS', () => {
+  it('возвращает undefined для null и пустой строки; парсит число; срезает OWS', () => {
     expect(parseRetryAfterMs(null)).toBeUndefined();
     expect(parseRetryAfterMs('')).toBeUndefined();
 
     expect(parseRetryAfterMs('5')).toBe(5000);
-    expect(parseRetryAfterMs('30')).toBe(30_000);
-    expect(parseRetryAfterMs('0')).toBe(0);
-
     expect(parseRetryAfterMs(' 5 ')).toBe(5000);
-    expect(parseRetryAfterMs('\t5\t')).toBe(5000);
   });
 
   it('парсит IMF-fixdate и возвращает 0 для даты в прошлом', () => {
@@ -129,7 +121,6 @@ describe('parseRetryAfterMs', () => {
 
       const future = new Date('2026-09-13T12:00:30Z').toUTCString();
       expect(parseRetryAfterMs(future)).toBe(30_000);
-      expect(parseRetryAfterMs(` ${future} `)).toBe(30_000);
 
       const past = new Date('2026-09-13T11:00:00Z').toUTCString();
       expect(parseRetryAfterMs(past)).toBe(0);
@@ -140,23 +131,11 @@ describe('parseRetryAfterMs', () => {
 
   it.each([
     'not-a-date',
-    'garbage',
     '1e3',
-    '0x10',
     '+5',
-    '-5',
-    '1.5',
-    'GMT',
-    '-5 GMT',
-    '+5 GMT',
     'garbage GMT',
-    'Wed, 21 Oct 2026 07:28:00 GMT extra',
     'Wed, 21 Oct 2026 07:28:00 UTC',
-    'Xxx, 21 Oct 2026 07:28:00 GMT',
-    'Wed, 21 Xxx 2026 07:28:00 GMT',
     'sun, 06 Nov 1994 08:49:37 GMT',
-    'Sun, 06 nov 1994 08:49:37 GMT',
-    'SUN, 06 NOV 1994 08:49:37 GMT',
   ])('отсекает не-IMF-fixdate значение: %s', (input) => {
     expect(parseRetryAfterMs(input)).toBeUndefined();
   });

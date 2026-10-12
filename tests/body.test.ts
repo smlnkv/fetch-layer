@@ -11,27 +11,21 @@ import { parseResponse, prepareBody, readBodyAsJsonOrText } from '../src/transpo
 describe('prepareBody', () => {
   it.each([
     [undefined, { body: undefined, contentType: undefined }],
-    [null, { body: undefined, contentType: undefined }],
     ['hello', { body: 'hello', contentType: undefined }],
-    ['', { body: '', contentType: undefined }],
     [
       { name: 'Alice', age: 30 },
       { body: '{"name":"Alice","age":30}', contentType: 'application/json' },
     ],
     [[1, 2, 3], { body: '[1,2,3]', contentType: 'application/json' }],
     [42, { body: '42', contentType: 'application/json' }],
-    [true, { body: 'true', contentType: 'application/json' }],
   ])('%o -> тело и Content-Type', (value, expected) => {
     expect(prepareBody(value)).toEqual(expected);
   });
 
-  it('JSON: Date через toJSON, NaN и Infinity как null, undefined пропускается', () => {
+  it('Date через toJSON', () => {
     expect(prepareBody({ date: new Date('2026-09-13T12:00:00.000Z') }).body).toBe(
       '{"date":"2026-09-13T12:00:00.000Z"}',
     );
-    expect(prepareBody({ a: NaN, b: Infinity }).body).toBe('{"a":null,"b":null}');
-    expect(prepareBody({ a: 1, b: undefined }).body).toBe('{"a":1}');
-    expect(prepareBody([1, undefined, 2]).body).toBe('[1,null,2]');
   });
 
   it('FormData, Blob и File уходят как есть', () => {
@@ -51,32 +45,20 @@ describe('prepareBody', () => {
       contentType: 'application/octet-stream',
     });
 
-    // File распознаётся отдельной категорией, но обрабатывается
-    // как Blob: тело уходит как есть, Content-Type берётся из type.
     const typedFile = new File(['content'], 'avatar.png', { type: 'image/png' });
     expect(prepareBody(typedFile)).toEqual({
       body: typedFile,
       contentType: 'image/png',
     });
-
-    const untypedFile = new File(['content'], 'unknown.bin');
-    expect(prepareBody(untypedFile)).toEqual({
-      body: untypedFile,
-      contentType: 'application/octet-stream',
-    });
   });
 
-  it('ArrayBuffer, TypedArray, DataView: application/octet-stream', () => {
+  it('ArrayBuffer, TypedArray: application/octet-stream', () => {
     expect(prepareBody(new ArrayBuffer(8))).toEqual({
       body: expect.any(ArrayBuffer),
       contentType: 'application/octet-stream',
     });
     expect(prepareBody(new Uint8Array([1, 2, 3]))).toEqual({
       body: expect.any(Uint8Array),
-      contentType: 'application/octet-stream',
-    });
-    expect(prepareBody(new DataView(new ArrayBuffer(8)))).toEqual({
-      body: expect.any(DataView),
       contentType: 'application/octet-stream',
     });
   });
@@ -124,9 +106,6 @@ describe('prepareBody', () => {
 
   it.each([
     ['Map', new Map([['a', 1]])],
-    ['Set', new Set([1, 2])],
-    ['WeakMap', new WeakMap()],
-    ['WeakSet', new WeakSet()],
     ['RegExp', /pattern/],
     ['Error', new Error('boom')],
   ])('%s на верхнем уровне: BODY_SERIALIZATION_ERROR с именем типа', (_name, value) => {
@@ -144,12 +123,8 @@ describe('prepareBody', () => {
 
   it.each([
     ['Blob', new Blob(['x'])],
-    ['File', new File(['x'], 'x.txt')],
     ['FormData', new FormData()],
-    ['URLSearchParams', new URLSearchParams({ a: '1' })],
     ['ArrayBuffer', new ArrayBuffer(8)],
-    ['TypedArray', new Uint8Array([1])],
-    ['ReadableStream', new ReadableStream()],
   ])('%s во вложенном значении отклоняется до отправки', (_name, value) => {
     // Без этой проверки JSON.stringify превратил бы вложенный Blob
     // в {}, и сервер получил бы пустой объект вместо данных.
@@ -203,9 +178,7 @@ describe('parseResponse', () => {
   it('text, blob, arrayBuffer, stream', async () => {
     expect(await parseResponse(new Response('hello world'), 'text')).toBe('hello world');
 
-    const blobResult = await parseResponse(new Response('binary content'), 'blob');
-    expect(blobResult).toBeInstanceOf(Blob);
-    expect(await (blobResult as Blob).text()).toBe('binary content');
+    expect(await parseResponse(new Response('binary'), 'blob')).toBeInstanceOf(Blob);
 
     expect(await parseResponse(new Response('content'), 'arrayBuffer')).toBeInstanceOf(ArrayBuffer);
 

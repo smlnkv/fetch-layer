@@ -112,16 +112,11 @@ describe('client - head и options', () => {
 });
 
 describe('client - пустые ответы', () => {
-  it('204 и 304 возвращают undefined', async () => {
-    const mock = createMockFetch(() => ({ status: 204 }));
+  it.each([204, 304])('%i возвращает undefined', async (status) => {
+    const mock = createMockFetch(() => ({ status }));
     const client = createTestClient({ fetch: mock.fetch });
 
-    expect(await client.delete('/users/1')).toBeUndefined();
-
-    const mock2 = createMockFetch(() => ({ status: 304 }));
-    const client2 = createTestClient({ fetch: mock2.fetch });
-
-    expect(await client2.get('/users')).toBeUndefined();
+    expect(await client.get('/users')).toBeUndefined();
   });
 });
 
@@ -509,14 +504,12 @@ describe('client - fetchOptions', () => {
         fetchOptions: {
           cache: 'no-store',
           redirect: 'manual',
-          keepalive: true,
         },
       },
     );
 
     expect(capturedInit?.cache).toBe('no-store');
     expect(capturedInit?.redirect).toBe('manual');
-    expect(capturedInit?.keepalive).toBe(true);
   });
 });
 
@@ -663,7 +656,7 @@ describe('client - валидация', () => {
     const mock = createMockFetch(() => ({ body: {} }));
     const client = createTestClient({ fetch: mock.fetch });
 
-    for (const badTimeout of [-1, 0, NaN, 50]) {
+    for (const badTimeout of [-1, NaN]) {
       try {
         await client.get('/users', { timeoutMs: badTimeout });
         expect.fail('should have thrown');

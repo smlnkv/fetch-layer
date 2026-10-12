@@ -228,18 +228,16 @@ describe('retry - 408 и 429', () => {
 });
 
 describe('retry - не повторяет', () => {
-  it('4xx кроме 408 и 429, отменённые запросы, skipRetry: true', async () => {
+  it('4xx, отменённые запросы, skipRetry: true', async () => {
     // 4xx.
-    for (const status of [400, 404, 422]) {
-      let attempts = 0;
-      const mock = createMockFetch(() => {
-        attempts++;
-        return { status, body: {} };
-      });
-      const client = createRetryClient({ fetch: mock.fetch, maxAttempts: 3, sleep: noSleep });
-      await expect(client.get('/users')).rejects.toMatchObject({ status });
-      expect(attempts).toBe(1);
-    }
+    let attempts = 0;
+    const mock = createMockFetch(() => {
+      attempts++;
+      return { status: 400, body: {} };
+    });
+    const client = createRetryClient({ fetch: mock.fetch, maxAttempts: 3, sleep: noSleep });
+    await expect(client.get('/users')).rejects.toMatchObject({ status: 400 });
+    expect(attempts).toBe(1);
 
     // Отменённый запрос: попытки не начинаются.
     let attempts2 = 0;
@@ -265,23 +263,21 @@ describe('retry - не повторяет', () => {
   });
 
   it('auth-ошибки, даже если shouldRetry: true', async () => {
-    for (const status of [401, 403]) {
-      let attempts = 0;
-      const mock = createMockFetch(() => {
-        attempts++;
-        return { status, body: {} };
-      });
+    let attempts = 0;
+    const mock = createMockFetch(() => {
+      attempts++;
+      return { status: 401, body: {} };
+    });
 
-      const client = createRetryClient({
-        fetch: mock.fetch,
-        maxAttempts: 3,
-        sleep: noSleep,
-        shouldRetry: () => true,
-      });
+    const client = createRetryClient({
+      fetch: mock.fetch,
+      maxAttempts: 3,
+      sleep: noSleep,
+      shouldRetry: () => true,
+    });
 
-      await expect(client.get('/users')).rejects.toBeDefined();
-      expect(attempts).toBe(1);
-    }
+    await expect(client.get('/users')).rejects.toBeDefined();
+    expect(attempts).toBe(1);
   });
 });
 

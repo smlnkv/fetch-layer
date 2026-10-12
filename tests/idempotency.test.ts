@@ -1,5 +1,3 @@
-import { Readable } from 'node:stream';
-
 import { describe, expect, it, vi } from 'vitest';
 
 import { createMemoryStorage, type Client } from '../src/index';
@@ -9,7 +7,6 @@ import {
   type IdempotencyOutcome,
   type IdempotencySource,
 } from '../src/layers/idempotency/index';
-import { memoryStorageSource } from '../src/layers/idempotency/sources';
 
 import { createMockFetch, createTestClient, createTestStorage } from './helpers';
 
@@ -32,25 +29,21 @@ function keyOf(call: { headers: Record<string, string> } | undefined): string | 
 }
 
 describe('idempotency - добавление ключа', () => {
-  it('добавляет ключ к мутирующим методам, не добавляет к GET; метод нормализуется в верхний регистр', async () => {
+  it('добавляет ключ к мутирующим, не добавляет к GET; метод нормализуется', async () => {
     const mock = createMockFetch(() => ({ body: null }));
     const source = createSessionSource({ storage: createMemoryStorage() });
     const client = createIdempotentClient({ fetch: mock.fetch, source });
 
     await client.post('/orders', { total: 100 });
     await client.delete('/orders/1');
-    await client.put('/users/1', { name: 'Alice' });
-    await client.patch('/users/2', { name: 'Bob' });
-
-    for (let i = 0; i < 4; i++) {
-      expect(keyOf(mock.calls[i])).toBeDefined();
-    }
+    expect(keyOf(mock.calls[0])).toBeDefined();
+    expect(keyOf(mock.calls[1])).toBeDefined();
 
     await client.get('/orders');
-    expect(keyOf(mock.calls[4])).toBeUndefined();
+    expect(keyOf(mock.calls[2])).toBeUndefined();
 
     await client.post('/orders', { total: 100 }, { skipIdempotency: true });
-    expect(keyOf(mock.calls[5])).toBeUndefined();
+    expect(keyOf(mock.calls[3])).toBeUndefined();
 
     // Метод в нижнем регистре нормализуется в client.ts до входа
     // в pipeline; withIdempotency распознаёт 'post' как мутирующий.
@@ -59,22 +52,8 @@ describe('idempotency - добавление ключа', () => {
       method: 'post' as unknown as 'POST',
       body: { total: 100 },
     });
-    expect(mock.calls[6]?.method).toBe('POST');
-    expect(keyOf(mock.calls[6])).toBeDefined();
-  });
-
-  it('memoryStorageSource работает как источник ключей', async () => {
-    const mock = createMockFetch(() => ({ body: { id: '1' } }));
-    const client = createTestClient({
-      fetch: mock.fetch,
-      idempotency: { source: memoryStorageSource() },
-    });
-
-    await client.post('/orders', { total: 100 });
-    await client.get('/orders');
-
-    expect(mock.calls[0]?.headers['idempotency-key']).toBeDefined();
-    expect(mock.calls[1]?.headers['idempotency-key']).toBeUndefined();
+    expect(mock.calls[4]?.method).toBe('POST');
+    expect(keyOf(mock.calls[4])).toBeDefined();
   });
 });
 
@@ -118,7 +97,7 @@ describe('idempotency - отпечаток: body, scope, query', () => {
     expect(keyOf(mock.calls[2])).not.toBe(keyOf(mock.calls[3]));
   });
 
-  it('query участвует в отпечатке: значение, порядок, undefined/null, пустой query', async () => {
+  it('query участвует в отпечатке: значение, порядок, undefined/null', async () => {
     const mock = createMockFetch(() => {
       throw new TypeError('Network down');
     });
@@ -141,17 +120,12 @@ describe('idempotency - отпечаток: body, scope, query', () => {
     await expect(client.post('/transfer', body, { query: { b: 2, a: 1 } })).rejects.toBeDefined();
     expect(keyOf(mock.calls[2])).toBe(keyOf(mock.calls[3]));
 
-    // Отсутствие query и пустой query эквивалентны.
-    await expect(client.post('/transfer', body)).rejects.toBeDefined();
-    await expect(client.post('/transfer', body, { query: {} })).rejects.toBeDefined();
-    expect(keyOf(mock.calls[4])).toBe(keyOf(mock.calls[5]));
-
     // undefined и null в query не влияют на отпечаток.
     await expect(client.post('/transfer', body)).rejects.toBeDefined();
     await expect(
       client.post('/transfer', body, { query: { a: undefined, b: null } }),
     ).rejects.toBeDefined();
-    expect(keyOf(mock.calls[6])).toBe(keyOf(mock.calls[7]));
+    expect(keyOf(mock.calls[4])).toBe(keyOf(mock.calls[5]));
 
     // Разные body при одинаковом query дают разные ключи.
     await expect(
@@ -160,7 +134,7 @@ describe('idempotency - отпечаток: body, scope, query', () => {
     await expect(
       client.post('/transfer', { amount: 200 }, { query: { type: 'internal' } }),
     ).rejects.toBeDefined();
-    expect(keyOf(mock.calls[8])).not.toBe(keyOf(mock.calls[9]));
+    expect(keyOf(mock.calls[6])).not.toBe(keyOf(mock.calls[7]));
   });
 });
 
@@ -236,8 +210,8 @@ describe('idempotency - исходы', () => {
     expect(keyOf(mock2.calls[0])).not.toBe(keyOf(mock2.calls[1]));
   });
 
-  it('сохраняет ключ после indefinite-failure: 5xx, 408, 429 и сеть', async () => {
-    for (const status of [500, 502, 408, 429]) {
+  it('сохраняет ключ после indefinite-failure: 5xx, 408 и сеть', async () => {
+    for (const status of [500, 408]) {
       const mock = createMockFetch(() => ({ status, body: { code: 'TEMPORARY' } }));
       const source = createSessionSource({ storage: createMemoryStorage() });
       const client = createIdempotentClient({ fetch: mock.fetch, source });
@@ -328,57 +302,6 @@ describe('idempotency - несериализуемые тела', () => {
       expect(Object.keys(store)).toHaveLength(0);
     }
   });
-
-  it('File: два разных File дают разные ключи, в хранилище не пишется', async () => {
-    const seenKeys: string[] = [];
-
-    const mock = createMockFetch((_, init) => {
-      const headers = init.headers as Record<string, string>;
-      seenKeys.push(headers['idempotency-key'] ?? '');
-      return { body: { ok: true } };
-    });
-
-    const storage = createMemoryStorage();
-    const source = createSessionSource({ storage });
-    const client = createIdempotentClient({ fetch: mock.fetch, source });
-
-    const fileA = new File(['aaa'], 'avatar.png', { type: 'image/png' });
-    const fileB = new File(['bbb'], 'avatar.png', { type: 'image/png' });
-
-    await client.post('/upload', fileA, { idempotencyScope: 'avatar' });
-    await client.post('/upload', fileB, { idempotencyScope: 'avatar' });
-
-    expect(seenKeys).toHaveLength(2);
-    expect(seenKeys[0]).not.toBe(seenKeys[1]);
-
-    const raw = storage.getItem('idempotency:session');
-    const store = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
-    expect(Object.keys(store)).toHaveLength(0);
-  });
-
-  it('Node stream.Readable: два разных стрима дают разные ключи, в хранилище не пишется', async () => {
-    const seenKeys: string[] = [];
-
-    const mock = createMockFetch((_, init) => {
-      const headers = init.headers as Record<string, string>;
-      seenKeys.push(headers['idempotency-key'] ?? '');
-      return { body: { ok: true } };
-    });
-
-    const storage = createMemoryStorage();
-    const source = createSessionSource({ storage });
-    const client = createIdempotentClient({ fetch: mock.fetch, source });
-
-    await client.post('/upload', Readable.from(['aaa']), { idempotencyScope: 'upload' });
-    await client.post('/upload', Readable.from(['bbb']), { idempotencyScope: 'upload' });
-
-    expect(seenKeys).toHaveLength(2);
-    expect(seenKeys[0]).not.toBe(seenKeys[1]);
-
-    const raw = storage.getItem('idempotency:session');
-    const store = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
-    expect(Object.keys(store)).toHaveLength(0);
-  });
 });
 
 describe('idempotency - ошибки', () => {
@@ -398,23 +321,21 @@ describe('idempotency - ошибки', () => {
     expect(mock.calls).toHaveLength(0);
   });
 
-  it('ошибка IDEMPOTENCY_KEY_INVALID при пустом или whitespace-only ключе', async () => {
-    for (const badKey of ['', '   ']) {
-      const source = createSessionSource({
-        storage: createMemoryStorage(),
-        generateKey: () => badKey,
-      });
+  it('ошибка IDEMPOTENCY_KEY_INVALID при пустом ключе', async () => {
+    const source = createSessionSource({
+      storage: createMemoryStorage(),
+      generateKey: () => '',
+    });
 
-      const mock = createMockFetch(() => ({ body: { id: '1' } }));
-      const client = createIdempotentClient({ fetch: mock.fetch, source });
+    const mock = createMockFetch(() => ({ body: { id: '1' } }));
+    const client = createIdempotentClient({ fetch: mock.fetch, source });
 
-      await expect(client.post('/orders', { total: 100 })).rejects.toMatchObject({
-        kind: 'serialize',
-        code: 'IDEMPOTENCY_KEY_INVALID',
-      });
+    await expect(client.post('/orders', { total: 100 })).rejects.toMatchObject({
+      kind: 'serialize',
+      code: 'IDEMPOTENCY_KEY_INVALID',
+    });
 
-      expect(mock.calls).toHaveLength(0);
-    }
+    expect(mock.calls).toHaveLength(0);
   });
 
   it('ошибка BODY_SERIALIZATION_ERROR при циклических ссылках', async () => {

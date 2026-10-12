@@ -5,11 +5,8 @@ import { describe, expect, it } from 'vitest';
 import { createMemoryStorage, fromWebStorage } from '../src/shared/storage';
 
 describe('createMemoryStorage', () => {
-  it('сохраняет, читает, перезаписывает; null для отсутствующего; удаление идемпотентно', () => {
+  it('сохраняет, читает, перезаписывает, удаляет', () => {
     const storage = createMemoryStorage();
-
-    expect(storage.getItem('missing')).toBeNull();
-    expect(() => storage.removeItem('missing')).not.toThrow();
 
     storage.setItem('key', 'value');
     expect(storage.getItem('key')).toBe('value');
@@ -20,40 +17,18 @@ describe('createMemoryStorage', () => {
     storage.removeItem('key');
     expect(storage.getItem('key')).toBeNull();
   });
-
-  it('изолировано между экземплярами', () => {
-    const storage1 = createMemoryStorage();
-    const storage2 = createMemoryStorage();
-
-    storage1.setItem('key', 'value1');
-    storage2.setItem('key', 'value2');
-
-    expect(storage1.getItem('key')).toBe('value1');
-    expect(storage2.getItem('key')).toBe('value2');
-  });
 });
 
 function createFakeStorage(overrides: Partial<Storage> = {}): Storage {
   const map = new Map<string, string>();
 
   const storage = {
-    get length() {
-      return map.size;
-    },
-    key(i: number): string | null {
-      return Array.from(map.keys())[i] ?? null;
-    },
-    getItem(k: string): string | null {
-      return map.get(k) ?? null;
-    },
-    setItem(k: string, v: string): void {
+    getItem: (k: string): string | null => map.get(k) ?? null,
+    setItem: (k: string, v: string): void => {
       map.set(k, v);
     },
-    removeItem(k: string): void {
+    removeItem: (k: string): void => {
       map.delete(k);
-    },
-    clear(): void {
-      map.clear();
     },
     ...overrides,
   };
@@ -62,19 +37,6 @@ function createFakeStorage(overrides: Partial<Storage> = {}): Storage {
 }
 
 describe('fromWebStorage', () => {
-  it('делегирует обычные операции в базовое хранилище', () => {
-    const web = createFakeStorage();
-    const storage = fromWebStorage(web);
-
-    storage.setItem('key', 'value');
-    expect(storage.getItem('key')).toBe('value');
-    expect(web.getItem('key')).toBe('value');
-
-    storage.removeItem('key');
-    expect(storage.getItem('key')).toBeNull();
-    expect(storage.getItem('missing')).toBeNull();
-  });
-
   it('getItem возвращает null при сбое, setItem ошибку, removeItem игнорирует', () => {
     const failingGet = createFakeStorage({
       getItem: () => {

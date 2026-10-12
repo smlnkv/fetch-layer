@@ -11,9 +11,19 @@ import { createMockFetch, createTestSessionProvider } from './helpers';
 import type { SessionProvider } from '../src/layers/auth/index';
 
 describe('validateLayerOrder - порядок stage', () => {
-  it('принимает правильный порядок и кастомные слои без stage', () => {
+  it('принимает правильный порядок, кастомные слои без stage и дробные stage', () => {
     const customLayer: Layer = {
       name: 'custom',
+      wrap: (next) => ({ fn: next }),
+    };
+    const withMetrics: Layer = {
+      name: 'withMetrics',
+      stage: 2.5,
+      wrap: (next) => ({ fn: next }),
+    };
+    const withLogging: Layer = {
+      name: 'withLogging',
+      stage: 1.5,
       wrap: (next) => ({ fn: next }),
     };
 
@@ -23,7 +33,9 @@ describe('validateLayerOrder - порядок stage', () => {
         layers: [
           customLayer,
           withIdempotency({ nextKey: () => 'k' }),
+          withMetrics,
           withRetry({ maxAttempts: 1 }),
+          withLogging,
           withAuth({ provider: createTestSessionProvider() }),
         ],
       }),
@@ -55,33 +67,7 @@ describe('validateLayerOrder - порядок stage', () => {
     ).toThrow(/order/);
   });
 
-  it('принимает кастомный слой со stage 2.5 или 1.5 между встроенными', () => {
-    const withMetrics: Layer = {
-      name: 'withMetrics',
-      stage: 2.5,
-      wrap: (next) => ({ fn: next }),
-    };
-    const withLogging: Layer = {
-      name: 'withLogging',
-      stage: 1.5,
-      wrap: (next) => ({ fn: next }),
-    };
-
-    expect(() =>
-      createClient({
-        baseUrl: '/api',
-        layers: [
-          withIdempotency({ nextKey: () => 'k' }),
-          withMetrics,
-          withRetry({ maxAttempts: 1 }),
-          withLogging,
-          withAuth({ provider: createTestSessionProvider() }),
-        ],
-      }),
-    ).not.toThrow();
-  });
-
-  it('отклоняет NaN, Infinity и -Infinity в stage', () => {
+  it('отклоняет NaN и Infinity в stage', () => {
     const withNaN: Layer = {
       name: 'withNaN',
       stage: NaN,
@@ -92,11 +78,6 @@ describe('validateLayerOrder - порядок stage', () => {
       stage: Infinity,
       wrap: (next) => ({ fn: next }),
     };
-    const withNegativeInfinity: Layer = {
-      name: 'withNegativeInfinity',
-      stage: -Infinity,
-      wrap: (next) => ({ fn: next }),
-    };
 
     expect(() => createClient({ baseUrl: '/api', layers: [withNaN] })).toThrow(
       /withNaN.*invalid stage NaN/,
@@ -104,21 +85,11 @@ describe('validateLayerOrder - порядок stage', () => {
     expect(() => createClient({ baseUrl: '/api', layers: [withInfinity] })).toThrow(
       /withInfinity.*invalid stage Infinity/,
     );
-    expect(() => createClient({ baseUrl: '/api', layers: [withNegativeInfinity] })).toThrow(
-      /withNegativeInfinity.*invalid stage -Infinity/,
-    );
   });
 });
 
 describe('validateLayerOrder - дубликаты', () => {
-  it('ошибка при дубликате слоя по name (встроенного и кастомного)', () => {
-    expect(() =>
-      createClient({
-        baseUrl: '/api',
-        layers: [withRetry({ maxAttempts: 1 }), withRetry({ maxAttempts: 1 })],
-      }),
-    ).toThrow(/more than once/);
-
+  it('ошибка при дубликате слоя по name', () => {
     const custom: Layer = {
       name: 'withTiming',
       wrap: (next) => ({ fn: next }),

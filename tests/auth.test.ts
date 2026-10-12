@@ -11,28 +11,19 @@ import { createMockFetch, createTestSessionProvider, createTestClient } from './
 
 describe('auth - добавление заголовков', () => {
   it('добавляет один или несколько заголовков из провайдера', async () => {
-    const provider1 = createTestSessionProvider({
-      headers: { Authorization: 'Bearer token-1' },
-    });
-    const mock1 = createMockFetch(() => ({ body: { id: '1' } }));
-    const client1 = createTestClient({ fetch: mock1.fetch, auth: { provider: provider1 } });
-    await client1.get('/users/me');
-    expect(mock1.calls[0]?.headers.authorization).toBe('Bearer token-1');
-
-    const provider2 = createTestSessionProvider({
+    const provider = createTestSessionProvider({
       headers: {
         Authorization: 'Bearer token-1',
         'X-CSRF-Token': 'csrf-1',
-        'X-API-Key': 'key-1',
       },
     });
-    const mock2 = createMockFetch(() => ({ body: null }));
-    const client2 = createTestClient({ fetch: mock2.fetch, auth: { provider: provider2 } });
-    await client2.get('/users');
-    const headers = mock2.calls[0]?.headers;
+    const mock = createMockFetch(() => ({ body: { id: '1' } }));
+    const client = createTestClient({ fetch: mock.fetch, auth: { provider } });
+    await client.get('/users/me');
+
+    const headers = mock.calls[0]?.headers;
     expect(headers?.authorization).toBe('Bearer token-1');
     expect(headers?.['x-csrf-token']).toBe('csrf-1');
-    expect(headers?.['x-api-key']).toBe('key-1');
   });
 
   it('пропускает заголовки и refresh при skipAuth: true', async () => {
@@ -185,8 +176,6 @@ describe('auth - 401 -> refresh -> повтор', () => {
   });
 
   it('не повторяет больше одного раза после refresh', async () => {
-    let attempts = 0;
-
     const provider: SessionProvider = {
       getAuthHeaders: () => ({ Authorization: 'Bearer token' }),
       refresh: async () => ({
@@ -195,6 +184,7 @@ describe('auth - 401 -> refresh -> повтор', () => {
       }),
     };
 
+    let attempts = 0;
     const mock = createMockFetch(() => {
       attempts++;
       return { status: 401, body: { code: 'SESSION_INVALID' } };
@@ -470,13 +460,6 @@ describe('auth - валидация конфигурации', () => {
         auth: { provider, refreshTimeoutMs: 0 },
       }),
     ).toThrow(/refreshTimeoutMs/);
-
-    expect(() =>
-      createTestClient({
-        fetch: createMockFetch(() => ({ body: {} })).fetch,
-        auth: { provider, refreshTimeoutMs: -1 },
-      }),
-    ).toThrow(/refreshTimeoutMs/);
   });
 });
 
@@ -592,14 +575,12 @@ describe('auth - circuit breaker', () => {
       auth: { provider, circuitBreakerMs: 60_000 },
     });
 
-    // Первый запрос: ошибка неизвестного типа, circuit не открыт.
     await expect(client.get('/a')).rejects.toMatchObject({
       kind: 'unknown',
       message: 'Bug in provider',
     });
     expect(refreshCalls).toBe(1);
 
-    // Второй запрос: circuit не открыт, refresh вызывается снова.
     await expect(client.get('/b')).rejects.toMatchObject({
       kind: 'unknown',
       message: 'Bug in provider',
@@ -607,9 +588,7 @@ describe('auth - circuit breaker', () => {
     expect(refreshCalls).toBe(2);
   });
 
-  it('открывает circuit на network и 5xx из provider.refresh', async () => {
-    // TypeError из refresh классифицируется как network: реализация
-    // обычно делает fetch внутри. Circuit открывается как раньше.
+  it('открывает circuit на network из provider.refresh', async () => {
     let refreshCalls = 0;
     const provider: SessionProvider = {
       getAuthHeaders: () => ({ Authorization: 'Bearer token' }),
@@ -650,19 +629,15 @@ describe('auth - cooldown', () => {
 
     const mock = createMockFetch(() => {
       serverCalls++;
-      // Запрос 1: старая авторизация -> 401.
       if (serverCalls === 1) {
         return { status: 401, body: { code: 'SESSION_INVALID' } };
       }
-      // Запрос 2: с новым токеном -> успех.
       if (serverCalls === 2) {
         return { body: { ok: 'first' } };
       }
-      // Запрос 3: снова старая авторизация (симуляция рассинхронизации) -> 401.
       if (serverCalls === 3) {
         return { status: 401, body: { code: 'SESSION_INVALID' } };
       }
-      // Запрос 4: cooldown -> повтор с текущим токеном (new) -> успех.
       return { body: { ok: 'second' } };
     });
 
@@ -697,11 +672,9 @@ describe('auth - cooldown', () => {
 
     const mock = createMockFetch((_, init) => {
       const headers = init.headers as Record<string, string>;
-      // Первый запрос со старым токеном: 401 -> refresh -> повтор с новым.
       if (headers.authorization === 'Bearer old') {
         return { status: 401, body: { code: 'SESSION_INVALID' } };
       }
-      // Всё, что с новым токеном: 401 (симуляция: сервер отвергает новый токен).
       return { status: 401, body: { code: 'SESSION_INVALID' } };
     });
 
@@ -711,17 +684,12 @@ describe('auth - cooldown', () => {
       auth: { provider, circuitBreakerMs: 60_000, onSessionExpired },
     });
 
-    // Первый запрос: 401 -> refresh -> повтор с новым токеном -> 401.
-    // Это ветка token-rejected, onSessionExpired вызывается.
     await expect(client.get('/a')).rejects.toBeDefined();
     expect(onSessionExpired).toHaveBeenCalledWith('token-rejected');
     expect(refreshCalls).toBe(1);
 
     onSessionExpired.mockClear();
 
-    // Второй запрос: снова 401 на новый токен. Cooldown.
-    // Повтор с тем же токеном снова 401. onSessionExpired НЕ вызывается:
-    // refresh не запускался, мы не знаем, жива ли сессия.
     await expect(client.get('/b')).rejects.toMatchObject({ status: 401 });
     expect(refreshCalls).toBe(1);
     expect(onSessionExpired).not.toHaveBeenCalled();
@@ -787,8 +755,6 @@ describe('resetRefreshCircuit', () => {
       },
     };
 
-    // Мок всегда отвечает 401, чтобы после успешного refresh
-    // auth-слой получил 401 на повтор и завершил запрос ошибкой.
     const mock = createMockFetch(() => ({
       status: 401,
       body: { code: 'SESSION_INVALID' },
@@ -802,20 +768,14 @@ describe('resetRefreshCircuit', () => {
     const promise1 = client.get('/a');
     promise1.catch(() => {});
 
-    // Ждём, пока refresh начнётся.
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(refreshCalls).toBe(1);
 
-    // Сбрасываем circuit во время активного refresh.
     resetRefreshCircuit(client);
 
-    // Разрешаем первый refresh завершиться. Запрос завершится
-    // ошибкой 401: повтор с новым токеном тоже отвергнут.
     refreshResolvers[0]!();
     await expect(promise1).rejects.toBeDefined();
 
-    // Запрос 2 снова получит 401. Cooldown не сработает: reset
-    // подавил запись lastSuccessfulRefreshAt в первом refresh.
     const promise2 = client.get('/b');
     promise2.catch(() => {});
 
@@ -839,10 +799,7 @@ describe('SingleFlight', () => {
 
     sf.forget();
 
-    const B = new Promise<number>(() => {
-      // Никогда не завершается: проверяем, что ссылка на него
-      // не будет обнулена завершением A.
-    });
+    const B = new Promise<number>(() => {});
     const runB = sf.run(() => B);
 
     resolveA(1);

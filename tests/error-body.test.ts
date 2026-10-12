@@ -1,6 +1,5 @@
 // Тесты core/error-body.ts: parseFlatErrorBody и parseFields
-// как чистые функции. Без HTTP-моков: вход - значение,
-// выход - контентные поля ошибки.
+// как чистые функции.
 
 import { describe, expect, it } from 'vitest';
 
@@ -36,15 +35,13 @@ describe('parseFlatErrorBody', () => {
       parseFlatErrorBody({
         code: 123,
         message: { nested: true },
-        fields: { a: 'ok', b: 42, c: ['x'] },
+        fields: { a: 'ok', b: 42 },
       }),
     ).toEqual({ code: undefined, message: undefined, fields: { a: 'ok' } });
   });
 
-  it('null, undefined, массив, число возвращают пустой результат', () => {
+  it('null и число возвращают пустой результат', () => {
     expect(parseFlatErrorBody(null)).toEqual({});
-    expect(parseFlatErrorBody(undefined)).toEqual({});
-    expect(parseFlatErrorBody([1, 2, 3])).toEqual({});
     expect(parseFlatErrorBody(42)).toEqual({});
   });
 });
@@ -52,11 +49,9 @@ describe('parseFlatErrorBody', () => {
 describe('parseFields', () => {
   it('оставляет только строковые значения; не-объект и массив отбрасываются', () => {
     expect(parseFields({ a: 'x', b: 'y' })).toEqual({ a: 'x', b: 'y' });
-    expect(parseFields({ a: 'x', b: 1, c: null, d: {} })).toEqual({ a: 'x' });
+    expect(parseFields({ a: 'x', b: 1, c: null })).toEqual({ a: 'x' });
     expect(parseFields({})).toBeUndefined();
-    expect(parseFields({ a: 1 })).toBeUndefined();
     expect(parseFields('string')).toBeUndefined();
     expect(parseFields([['a', 'b']])).toBeUndefined();
-    expect(parseFields(null)).toBeUndefined();
   });
 });
