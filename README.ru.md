@@ -68,13 +68,24 @@ HTTP-клиент, который собирается из слоёв. Кажд
 
 - **Авторизация.** `withAuth` работает с любым `SessionProvider` - три метода: `getAuthHeaders`, `refresh`, `clear`. Три состояния refresh (`success`, `definitely-failed`, `temporarily-failed`) дают приложению контроль: разлогинить пользователя или повторить позже. Circuit breaker с настраиваемым `circuitBreakerMs` и `refreshTimeoutMs`, открывается только на сеть, таймаут и 5xx, не на ошибки в `refresh`. `resetRefreshCircuit` для ручного сброса.
 
-- **Идемпотентность.** `withIdempotency` хранит ключ в `sessionStorage`, `localStorage` или памяти. Для кастомного хранилища - интерфейс `IdempotencySource` из двух методов и утилита `stableSerialize` для отпечатка тела. `maxEntries` ограничивает размер хранилища, вытеснение - по времени использования.
+- **Идемпотентность.** `withIdempotency` добавляет заголовок `Idempotency-Key` на все мутирующие методы (POST, PUT, PATCH, DELETE). Для эндпоинтов, которые заголовок не принимают, передайте `skipIdempotency: true` на конкретном запросе. Ключ хранится в `sessionStorage`, `localStorage` или памяти. Для кастомного хранилища - интерфейс `IdempotencySource` из двух методов и утилита `stableSerialize` для отпечатка тела. `maxEntries` ограничивает размер хранилища, вытеснение - по времени использования.
 
 - **Повторы запросов.** `withRetry` настраивается: `maxAttempts`, `baseDelayMs`, `maxDelayMs`, `jitterRatio`, `retryOnNetwork`, `retryOnTimeout`. Свои политики через `shouldRetry`, `computeDelay`, `onBeforeRetry`. `Retry-After` от сервера имеет приоритет над вычисленной задержкой.
 
 - **Ошибки.** `ApiError` с геттерами `isRetryable`, `isCancelled`, `isAuthError`, `isUncertain` и другими. `err.fields` - готовая структура `Record<string, string>` для формы, если сервер отдаёт плоский формат. `err.rawBody` - оригинальное тело ответа для всего остального. Свой разбор через `parseErrorBody`.
 
-- **Транспорт.** Валидация `baseUrl`, `timeoutMs`, `fetch` и порядка слоёв при создании клиента. Заголовки принимаются как `Record`, `Headers` или массив пар. `defaultHeaders` для сквозных заголовков. Per-request `timeoutMs` и `signal`. `requestWithMeta` для HTTP-метаданных. `fetchOptions` для остальных параметров `fetch`.
+- **Транспорт.** Валидация `baseUrl`, `timeoutMs`, `fetch` и порядка слоёв при создании клиента. Заголовки принимаются как `Record`, `Headers` или массив пар. `defaultHeaders` для сквозных заголовков. Per-request `timeoutMs` и `signal`. `requestWithMeta` возвращает HTTP-метаданные вместе с данными. `fetchOptions` для остальных параметров `fetch`.
+
+  Асинхронные операции сервер может подтвердить ответом `202 Accepted` с заголовком `Retry-After`. Значение паузы в миллисекундах доступно в `meta.retryAfterMs` - ровно таким, каким его прислал сервер. Верхнюю границу библиотека не ставит: сколько ждать, решает приложение.
+
+  ```ts
+  const { meta } = await client.requestWithMeta({
+    path: '/api/jobs',
+    method: 'POST',
+    body: { action: 'start' },
+  });
+  await new Promise((resolve) => setTimeout(resolve, meta.retryAfterMs ?? 1000));
+  ```
 
 - **Тела запросов.** JSON, `FormData`, `Blob`, `File`, `ArrayBuffer`, `TypedArray`, `DataView`, `URLSearchParams`, `ReadableStream`, Node.js `stream.Readable`. Работа с типами из iframe и Worker. Рекурсивная проверка: вложенные несериализуемые значения отклоняются до отправки с `BODY_SERIALIZATION_ERROR`.
 

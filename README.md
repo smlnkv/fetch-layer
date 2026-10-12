@@ -68,13 +68,24 @@ Token refresh may fail: network is down, refresh endpoint returns 5xx. Without p
 
 - **Auth.** `withAuth` works with any `SessionProvider` - three methods: `getAuthHeaders`, `refresh`, `clear`. Three refresh states (`success`, `definitely-failed`, `temporarily-failed`) give the app control: log the user out or retry later. Circuit breaker with configurable `circuitBreakerMs` and `refreshTimeoutMs`, opens only on network errors, timeouts and 5xx, not on errors in `refresh`. `resetRefreshCircuit` for a manual reset.
 
-- **Idempotency.** `withIdempotency` stores the key in `sessionStorage`, `localStorage` or memory. Custom storage goes through `IdempotencySource` - two methods - plus `stableSerialize` for the body hash. `maxEntries` limits the store size, oldest entries are removed first.
+- **Idempotency.** `withIdempotency` adds an `Idempotency-Key` header to every mutating method (POST, PUT, PATCH, DELETE). For endpoints that do not accept the header, pass `skipIdempotency: true` on the request. The key is stored in `sessionStorage`, `localStorage` or memory. Custom storage goes through `IdempotencySource` - two methods - plus `stableSerialize` for the body hash. `maxEntries` limits the store size, oldest entries are removed first.
 
 - **Retries.** `withRetry` is configurable: `maxAttempts`, `baseDelayMs`, `maxDelayMs`, `jitterRatio`, `retryOnNetwork`, `retryOnTimeout`. Custom policies via `shouldRetry`, `computeDelay`, `onBeforeRetry`. `Retry-After` from the server takes priority over the computed delay.
 
 - **Errors.** `ApiError` with getters `isRetryable`, `isCancelled`, `isAuthError`, `isUncertain` and others. `err.fields` is a ready-to-use `Record<string, string>` for forms, when the server returns the flat shape. `err.rawBody` - the original response body for everything else. Custom parsing via `parseErrorBody`.
 
-- **Transport.** Validates `baseUrl`, `timeoutMs`, `fetch` and layer order at client creation. Headers accept `Record`, `Headers` or an array of pairs. `defaultHeaders` for common headers. Per-request `timeoutMs` and `signal`. `requestWithMeta` for HTTP metadata. `fetchOptions` for other `fetch` params.
+- **Transport.** Validates `baseUrl`, `timeoutMs`, `fetch` and layer order at client creation. Headers accept `Record`, `Headers` or an array of pairs. `defaultHeaders` for common headers. Per-request `timeoutMs` and `signal`. `requestWithMeta` returns HTTP metadata along with data. `fetchOptions` for other `fetch` params.
+
+  For async operations the server may answer `202 Accepted` with a `Retry-After` header. `meta.retryAfterMs` gives the value in milliseconds, exactly as the server sent it. The library does not cap the value: the app decides how long to wait.
+
+  ```ts
+  const { meta } = await client.requestWithMeta({
+    path: "/api/jobs",
+    method: "POST",
+    body: { action: "start" },
+  });
+  await new Promise((resolve) => setTimeout(resolve, meta.retryAfterMs ?? 1000));
+  ```
 
 - **Request bodies.** JSON, `FormData`, `Blob`, `File`, `ArrayBuffer`, `TypedArray`, `DataView`, `URLSearchParams`, `ReadableStream`, Node.js `stream.Readable`. Works with types from iframes and Workers. Recursive check: nested non-serializable values are rejected before the request is sent with `BODY_SERIALIZATION_ERROR`.
 
@@ -149,14 +160,14 @@ ESM only. CommonJS is not supported.
 
 The library is split into modules. Bundle size depends on what you import.
 
-| Module                    | What it exports                                                                                            |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `fetch-layer`             | `createClient`, `ApiError`, `toApiError`, `ErrorBodyParser`, storages and public types                     |
-| `fetch-layer/layers`      | Factories for all built-in layers and idempotency key sources                                              |
-| `fetch-layer/auth`        | Types `SessionProvider`, `RefreshResult`, `SessionExpiredReason`, `resetRefreshCircuit`                    |
-| `fetch-layer/idempotency` | `IdempotencySource`, `IdempotencyContext`, `IdempotencyOutcome`, `createSessionSource`, `stableSerialize`  |
-| `fetch-layer/retry`       | Only `withRetry` and its options                                                                           |
-| `fetch-layer/storage`     | `StorageLike`, `createMemoryStorage`, `fromWebStorage`                                                     |
+| Module                    | What it exports                                                                                           |
+| ------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `fetch-layer`             | `createClient`, `ApiError`, `toApiError`, `ErrorBodyParser`, storages and public types                    |
+| `fetch-layer/layers`      | Factories for all built-in layers and idempotency key sources                                             |
+| `fetch-layer/auth`        | Types `SessionProvider`, `RefreshResult`, `SessionExpiredReason`, `resetRefreshCircuit`                   |
+| `fetch-layer/idempotency` | `IdempotencySource`, `IdempotencyContext`, `IdempotencyOutcome`, `createSessionSource`, `stableSerialize` |
+| `fetch-layer/retry`       | Only `withRetry` and its options                                                                          |
+| `fetch-layer/storage`     | `StorageLike`, `createMemoryStorage`, `fromWebStorage`                                                    |
 
 ### Direct imports for minimal bundle
 
