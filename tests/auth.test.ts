@@ -3,7 +3,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { type ApiError } from '../src/index';
+import { type ApiError, type Client } from '../src/index';
 import { resetRefreshCircuit, type SessionProvider } from '../src/layers/auth/index';
 import { SingleFlight } from '../src/layers/auth/single-flight';
 
@@ -421,10 +421,6 @@ describe('auth - refreshTimeoutMs', () => {
   });
 
   it('refresh завершается по refreshTimeoutMs, даже если реализация не слушает signal', async () => {
-    // Провайдер принимает signal по сигнатуре, но не подписывается
-    // на него и возвращает промис, который никогда не завершается.
-    // Без гонки с таймаутным промисом вызов завис бы навсегда,
-    // а параллельные 401 встали бы в очередь через SingleFlight.
     const provider: SessionProvider = {
       getAuthHeaders: () => ({ Authorization: 'Bearer token' }),
       refresh: () => new Promise<never>(() => {}),
@@ -440,6 +436,46 @@ describe('auth - refreshTimeoutMs', () => {
       kind: 'timeout',
       code: 'REFRESH_TIMEOUT',
     });
+  });
+
+  it('отклонение provider.refresh после таймаута не даёт unhandledRejection', async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => {
+      unhandled.push(reason);
+    };
+    process.on('unhandledRejection', onUnhandled);
+
+    try {
+      let rejectProvider!: (reason: unknown) => void;
+      const providerPromise = new Promise<never>((_resolve, reject) => {
+        rejectProvider = reject;
+      });
+
+      const provider: SessionProvider = {
+        getAuthHeaders: () => ({ Authorization: 'Bearer token' }),
+        refresh: () => providerPromise,
+      };
+
+      const mock = createMockFetch(() => ({ status: 401, body: { code: 'SESSION_INVALID' } }));
+      const client = createTestClient({
+        fetch: mock.fetch,
+        auth: { provider, refreshTimeoutMs: 30, circuitBreakerMs: 60_000 },
+      });
+
+      const request = client.get('/users');
+      request.catch(() => {});
+
+      await new Promise((resolve) => setTimeout(resolve, 80));
+
+      rejectProvider(new Error('late failure'));
+
+      await expect(request).rejects.toMatchObject({ code: 'REFRESH_TIMEOUT' });
+
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(unhandled).toHaveLength(0);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
   });
 });
 
@@ -561,10 +597,6 @@ describe('auth - circuit breaker', () => {
       getAuthHeaders: () => ({ Authorization: 'Bearer token' }),
       refresh: async () => {
         refreshCalls++;
-        // Generic Error, не TypeError, не TimeoutError, не AbortError.
-        // Это баг в refresh, а не сбой auth-сервера. Ложное открытие
-        // замаскировало бы реальную причину под REFRESH_CIRCUIT_OPEN
-        // на circuitBreakerMs миллисекунд.
         throw new Error('Bug in provider');
       },
     };
@@ -650,14 +682,12 @@ describe('auth - cooldown', () => {
     expect(first.ok).toBe('first');
     expect(refreshCalls).toBe(1);
 
-    // Второй запрос: сервер отвечает 401, но refresh уже был
-    // недавно - cooldown, повтор с текущим токеном без refresh.
     const second = await client.get<{ ok: string }>('/b');
     expect(second.ok).toBe('second');
     expect(refreshCalls).toBe(1);
   });
 
-  it('cooldown не вызывает onSessionExpired даже если повтор даёт 401', async () => {
+  it('повторный 401 после cooldown-повтора вызывает onSessionExpired', async () => {
     let refreshCalls = 0;
     let token = 'old';
 
@@ -692,7 +722,7 @@ describe('auth - cooldown', () => {
 
     await expect(client.get('/b')).rejects.toMatchObject({ status: 401 });
     expect(refreshCalls).toBe(1);
-    expect(onSessionExpired).not.toHaveBeenCalled();
+    expect(onSessionExpired).toHaveBeenCalledWith('token-rejected');
   });
 });
 
@@ -726,6 +756,46 @@ describe('resetRefreshCircuit', () => {
     expect(onCircuitClose).toHaveBeenCalledTimes(1);
 
     await expect(client.get('/b')).rejects.toBeDefined();
+    expect(refreshCalls).toBe(2);
+  });
+
+  it('сбрасывает cooldown: следующий 401 запускает refresh', async () => {
+    let refreshCalls = 0;
+    let serverCalls = 0;
+
+    const provider: SessionProvider = {
+      getAuthHeaders: () => ({ Authorization: 'Bearer token' }),
+      refresh: async () => {
+        refreshCalls++;
+        return { status: 'success', headers: { Authorization: 'Bearer token' } };
+      },
+    };
+
+    const mock = createMockFetch(() => {
+      serverCalls++;
+      if (serverCalls === 1) {
+        return { status: 401, body: { code: 'SESSION_INVALID' } };
+      }
+      if (serverCalls === 2) {
+        return { body: { ok: 'first' } };
+      }
+      if (serverCalls === 3) {
+        return { status: 401, body: { code: 'SESSION_INVALID' } };
+      }
+      return { body: { ok: 'second' } };
+    });
+
+    const client = createTestClient({
+      fetch: mock.fetch,
+      auth: { provider, circuitBreakerMs: 60_000 },
+    });
+
+    await client.get('/a');
+    expect(refreshCalls).toBe(1);
+
+    resetRefreshCircuit(client);
+
+    await client.get('/b');
     expect(refreshCalls).toBe(2);
   });
 
@@ -787,6 +857,52 @@ describe('resetRefreshCircuit', () => {
   });
 });
 
+describe('auth - ре-энтрантность provider.refresh', () => {
+  it('401 внутри provider.refresh пробрасывается без повторного refresh и без зависания', async () => {
+    const warn = vi.fn();
+    let refreshCalls = 0;
+    let innerAttempts = 0;
+    const ref: { client?: Client } = {};
+
+    const mock = createMockFetch((url) => {
+      if (url.endsWith('/sessions')) {
+        innerAttempts++;
+      }
+      return { status: 401, body: { code: 'SESSION_INVALID' } };
+    });
+
+    const provider: SessionProvider = {
+      getAuthHeaders: () => ({ Authorization: 'Bearer token' }),
+      refresh: async (signal) => {
+        refreshCalls++;
+        try {
+          await ref.client!.get('/sessions', { signal });
+        } catch {
+          return { status: 'temporarily-failed', error: new Error('inner failed') };
+        }
+        return { status: 'success' };
+      },
+    };
+
+    const client = createTestClient({
+      fetch: mock.fetch,
+      auth: { provider, refreshTimeoutMs: 5000, circuitBreakerMs: 60_000 },
+      warn,
+    });
+    ref.client = client;
+
+    const started = Date.now();
+    await expect(client.get('/a')).rejects.toBeDefined();
+    const elapsed = Date.now() - started;
+
+    expect(elapsed).toBeLessThan(2000);
+    expect(innerAttempts).toBe(1);
+    expect(refreshCalls).toBe(1);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]?.[0]).toMatch(/inside provider\.refresh/);
+  });
+});
+
 describe('SingleFlight', () => {
   it('forget не ломает следующий run при завершении старой операции', async () => {
     const sf = new SingleFlight<number>();
@@ -805,9 +921,6 @@ describe('SingleFlight', () => {
     resolveA(1);
     await runA;
 
-    // После завершения A ссылка на B должна остаться в inFlight.
-    // Без защиты finally обнулил бы её, и следующий run создал бы
-    // параллельную операцию, а не присоединился к B.
     const runC = sf.run(() => Promise.resolve(3));
     expect(runC).toBe(runB);
   });

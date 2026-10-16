@@ -99,7 +99,7 @@ export function withAuth(options: AuthOptions): Layer {
     name: 'withAuth',
     stage: 1,
 
-    wrap(next: RequestFn, _context: LayerContext): LayerWrapResult {
+    wrap(next: RequestFn, context: LayerContext): LayerWrapResult {
       const manager = new RefreshManager(
         {
           onCircuitOpen: () => {
@@ -136,6 +136,20 @@ export function withAuth(options: AuthOptions): Layer {
 
           throwIfAborted(config.signal);
 
+          // 401 получен внутри provider.refresh. Второй refresh
+          // через тот же SingleFlight вернул бы тот же промис
+          // и зациклил вызов. Пробрасываем 401 без onSessionExpired:
+          // решение о судьбе сессии принимает вызывающий код.
+          if (manager.isRefreshSignal(config.signal)) {
+            safeCall(() =>
+              context.warn?.(
+                '[fetch-layer] withAuth: 401 inside provider.refresh. ' +
+                  'Use a separate client without withAuth for the refresh endpoint.',
+              ),
+            );
+            throw err;
+          }
+
           const outcome = await manager.refresh(provider, circuitBreakerMs);
 
           if (outcome.status === 'temporarily-failed') {
@@ -152,14 +166,27 @@ export function withAuth(options: AuthOptions): Layer {
 
           // cooldown: успешный refresh был меньше circuitBreakerMs
           // назад. Повторяем с текущими заголовками без вызова
-          // refresh и без onSessionExpired.
+          // refresh. Повторный 401 означает, что токен всё-таки
+          // отвергнут: сессия мертва, разлогиниваем как в success.
           if (outcome.status === 'cooldown') {
             throwIfAborted(config.signal);
             const currentHeaders = await safeGetAuthHeaders(provider);
-            return next<T>({
-              ...config,
-              headers: mergeHeaders(config.headers, currentHeaders),
-            });
+
+            try {
+              return await next<T>({
+                ...config,
+                headers: mergeHeaders(config.headers, currentHeaders),
+              });
+            } catch (retryError) {
+              const retryErr = toApiError(retryError);
+
+              if (retryErr.status === 401) {
+                safeClear(provider);
+                safeCall(() => onSessionExpired?.('token-rejected'));
+              }
+
+              throw retryErr;
+            }
           }
 
           // success: повтор после успешного обновления. Заголовки

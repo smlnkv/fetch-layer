@@ -59,6 +59,13 @@ export class RefreshManager {
    */
   private resetCount = 0;
 
+  /**
+   * Signals, переданные в provider.refresh. Нужны, чтобы отличить
+   * 401 внутри refresh от обычного 401: такой запрос инициирован
+   * самим refresh и не должен снова запускать refresh.
+   */
+  private readonly refreshSignals = new WeakSet<AbortSignal>();
+
   constructor(
     callbacks: RefreshManagerCallbacks = {},
     refreshTimeoutMs = DEFAULT_REFRESH_TIMEOUT_MS,
@@ -71,7 +78,7 @@ export class RefreshManager {
   }
 
   /**
-   * Сбрасывает предохранитель и забывает текущий refresh.
+   * Сбрасывает предохранитель, cooldown и забывает текущий refresh.
    * Вызывается через resetRefreshCircuit, когда приложение знает,
    * что проблема устранена.
    *
@@ -80,8 +87,17 @@ export class RefreshManager {
    */
   reset(): void {
     this.resetCount++;
+    this.lastSuccessfulRefreshAt = 0;
     this.singleFlight.forget();
     this.circuit.close();
+  }
+
+  /**
+   * true, если signal создан внутри текущего doRefresh. Запрос
+   * с таким signal инициирован провайдером, а не приложением.
+   */
+  isRefreshSignal(signal: AbortSignal | undefined): boolean {
+    return signal !== undefined && this.refreshSignals.has(signal);
   }
 
   /**
@@ -147,7 +163,14 @@ export class RefreshManager {
     let result: RefreshResult;
 
     try {
-      result = await Promise.race([provider.refresh(controller.signal), timeoutPromise]);
+      this.refreshSignals.add(controller.signal);
+      const providerPromise = provider.refresh(controller.signal);
+
+      // После таймаута race уже разрешён, а провайдер может
+      // отклониться позже. Без catch это unhandledRejection.
+      providerPromise.catch(() => {});
+
+      result = await Promise.race([providerPromise, timeoutPromise]);
     } catch (e) {
       const err = classifyFetchError(e);
 
