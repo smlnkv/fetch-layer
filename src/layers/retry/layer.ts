@@ -39,6 +39,11 @@ export interface RetryOptions {
    * Верхняя граница задержки. По умолчанию 10000. Ограничивает
    * вычисленную задержку backoff и служит порогом для Retry-After:
    * если сервер запросил больше, повтор не выполняется.
+   *
+   * Значение должно быть не меньше baseDelayMs после его
+   * ограничения снизу. Иначе withRetry выбрасывает ошибку при
+   * создании слоя: молча поднимать границу нельзя, приложение
+   * ожидает, что она соблюдается.
    */
   maxDelayMs?: number;
 
@@ -173,7 +178,14 @@ export function withRetry(options: RetryOptions = {}): Layer {
   }
 
   const baseDelayMs = clampDelay(rawBaseDelayMs, MIN_RETRY_MS);
-  const maxDelayMs = Math.max(baseDelayMs, rawMaxDelayMs);
+
+  if (rawMaxDelayMs < baseDelayMs) {
+    throw new Error(
+      `withRetry: maxDelayMs (${rawMaxDelayMs}) must be >= baseDelayMs (${baseDelayMs})`,
+    );
+  }
+
+  const maxDelayMs = rawMaxDelayMs;
 
   /**
    * По умолчанию повторяем всё, что isRetryable, но network и timeout

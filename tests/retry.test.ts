@@ -133,7 +133,6 @@ describe('retry - повтор на 5xx и сеть', () => {
 
 describe('retry - retryOnNetwork и retryOnTimeout', () => {
   it('false отключает повторы соответствующего kind, но остальные сохраняются', async () => {
-    // retryOnNetwork: false, timeout повторяется.
     let attempts1 = 0;
     const mock1 = createMockFetch(() => {
       attempts1++;
@@ -148,7 +147,6 @@ describe('retry - retryOnNetwork и retryOnTimeout', () => {
     await expect(client1.get('/users')).rejects.toMatchObject({ kind: 'network' });
     expect(attempts1).toBe(1);
 
-    // retryOnTimeout: false, network повторяется.
     let attempts2 = 0;
     const mock2 = createMockFetch(() => {
       attempts2++;
@@ -163,7 +161,6 @@ describe('retry - retryOnNetwork и retryOnTimeout', () => {
     await expect(client2.get('/users')).rejects.toMatchObject({ kind: 'timeout' });
     expect(attempts2).toBe(1);
 
-    // Обе false: сетевые ошибки не повторяются, 5xx повторяется.
     let attempts3 = 0;
     const mock3 = createMockFetch(() => {
       attempts3++;
@@ -182,8 +179,6 @@ describe('retry - retryOnNetwork и retryOnTimeout', () => {
   });
 
   it('shouldRetry приложения полностью заменяет дефолт', async () => {
-    // Пользовательский shouldRetry не композируется с retryOnNetwork
-    // и retryOnTimeout. Он получает ApiError и решает сам.
     let attempts = 0;
     const mock = createMockFetch(() => {
       attempts++;
@@ -198,8 +193,6 @@ describe('retry - retryOnNetwork и retryOnTimeout', () => {
       shouldRetry: () => true,
     });
 
-    // Пользовательский shouldRetry разрешает повтор, несмотря на
-    // retryOnNetwork: false.
     await expect(client.get('/users')).rejects.toBeDefined();
     expect(attempts).toBe(3);
   });
@@ -229,7 +222,6 @@ describe('retry - 408 и 429', () => {
 
 describe('retry - не повторяет', () => {
   it('4xx, отменённые запросы, skipRetry: true', async () => {
-    // 4xx.
     let attempts = 0;
     const mock = createMockFetch(() => {
       attempts++;
@@ -239,7 +231,6 @@ describe('retry - не повторяет', () => {
     await expect(client.get('/users')).rejects.toMatchObject({ status: 400 });
     expect(attempts).toBe(1);
 
-    // Отменённый запрос: попытки не начинаются.
     let attempts2 = 0;
     const mock2 = createMockFetch(() => {
       attempts2++;
@@ -251,7 +242,6 @@ describe('retry - не повторяет', () => {
     await expect(client2.get('/users', { signal: controller.signal })).rejects.toBeDefined();
     expect(attempts2).toBe(0);
 
-    // skipRetry: true.
     let attempts3 = 0;
     const mock3 = createMockFetch(() => {
       attempts3++;
@@ -308,7 +298,6 @@ describe('retry - Retry-After', () => {
   });
 
   it('не повторяет, если Retry-After превышает maxDelayMs; повторяет на границе', async () => {
-    // Превышает maxDelayMs - не повторяем.
     const sleep1 = createSleepSpy();
     const mock1 = createMockFetch(() => ({
       status: 503,
@@ -324,7 +313,6 @@ describe('retry - Retry-After', () => {
     await expect(client1.get('/users')).rejects.toMatchObject({ status: 503 });
     expect(sleep1).not.toHaveBeenCalled();
 
-    // На границе - повторяем.
     const sleep2 = createSleepSpy();
     let attempts = 0;
     const mock2 = createMockFetch(() => {
@@ -399,7 +387,6 @@ describe('retry - shouldRetry', () => {
 
     await client.get('/users');
 
-    // Fallback на defaultShouldRetry: 500 повторяется.
     expect(attempts).toBe(2);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0]?.[0]).toMatch(/shouldRetry threw/);
@@ -485,7 +472,6 @@ describe('retry - computeDelay', () => {
 
     await client.get('/users');
 
-    // Fallback на defaultCompute: baseDelayMs * 2^0 = 300.
     expect(attempts).toBe(2);
     expect(sleep.mock.calls[0]?.[0]).toBe(300);
     expect(warn).toHaveBeenCalledTimes(1);
@@ -549,11 +535,23 @@ describe('retry - валидация конфигурации', () => {
     expect(() => withRetry({ jitterRatio: 1 })).not.toThrow();
     expect(() => withRetry({ jitterRatio: 0.5 })).not.toThrow();
   });
+
+  it('maxDelayMs меньше baseDelayMs отвергается', () => {
+    expect(() => withRetry({ baseDelayMs: 5000, maxDelayMs: 1000 })).toThrow(
+      /maxDelayMs \(1000\) must be >= baseDelayMs \(5000\)/,
+    );
+  });
+
+  it('maxDelayMs сравнивается с baseDelayMs после его поднятия до MIN_RETRY_MS', () => {
+    expect(() => withRetry({ baseDelayMs: 50, maxDelayMs: 80 })).toThrow(
+      /maxDelayMs \(80\) must be >= baseDelayMs \(100\)/,
+    );
+    expect(() => withRetry({ baseDelayMs: 50, maxDelayMs: 100 })).not.toThrow();
+  });
 });
 
 describe('retry - onBeforeRetry', () => {
   it('вызывается перед каждой попыткой; может изменить конфиг или остановить повторы', async () => {
-    // Считает попытки с 1-based нумерацией.
     const calls: number[] = [];
     const mock1 = createMockFetch(() => ({ status: 500, body: {} }));
     const client1 = createRetryClient({
@@ -567,7 +565,6 @@ describe('retry - onBeforeRetry', () => {
     await expect(client1.get('/users')).rejects.toBeDefined();
     expect(calls).toEqual([1, 2]);
 
-    // Может изменить конфиг.
     let secondRequestHeader: string | undefined;
     const mock2 = createMockFetch((_, __, headers) => {
       if (headers['x-retry']) {
@@ -588,7 +585,6 @@ describe('retry - onBeforeRetry', () => {
     await client2.get('/users');
     expect(secondRequestHeader).toBe('1');
 
-    // Может остановить повторы через skipRetry.
     let attempts3 = 0;
     const mock3 = createMockFetch(() => {
       attempts3++;
@@ -646,7 +642,6 @@ describe('retry - warnOnUnsafeRetry', () => {
   it('не предупреждает при безопасных условиях', async () => {
     const warn = vi.fn();
 
-    // warnOnUnsafeRetry: false
     const mock1 = createMockFetch(() => ({ status: 500, body: {} }));
     const client1 = createRetryClient({
       fetch: mock1.fetch,
@@ -657,7 +652,6 @@ describe('retry - warnOnUnsafeRetry', () => {
     });
     await expect(client1.post('/orders', {})).rejects.toBeDefined();
 
-    // Ручной Idempotency-Key.
     const mock2 = createMockFetch(() => ({ status: 500, body: {} }));
     const client2 = createRetryClient({
       fetch: mock2.fetch,
@@ -670,7 +664,6 @@ describe('retry - warnOnUnsafeRetry', () => {
       client2.post('/orders', {}, { headers: { 'Idempotency-Key': 'test-key' } }),
     ).rejects.toBeDefined();
 
-    // GET.
     const mock3 = createMockFetch(() => ({ status: 500, body: {} }));
     const client3 = createRetryClient({
       fetch: mock3.fetch,
@@ -681,7 +674,6 @@ describe('retry - warnOnUnsafeRetry', () => {
     });
     await expect(client3.get('/users')).rejects.toBeDefined();
 
-    // skipIdempotency: true.
     const mock4 = createMockFetch(() => ({ status: 500, body: {} }));
     const client4 = createRetryClient({
       fetch: mock4.fetch,
@@ -692,7 +684,6 @@ describe('retry - warnOnUnsafeRetry', () => {
     });
     await expect(client4.post('/orders', {}, { skipIdempotency: true })).rejects.toBeDefined();
 
-    // withIdempotency с кастомным именем: маркер подавляет warn.
     const mock5 = createMockFetch(() => ({ status: 500, body: {} }));
     const client5 = createTestClient({
       fetch: mock5.fetch,
@@ -719,14 +710,11 @@ describe('retry - warnOnUnsafeRetry', () => {
       warn,
     });
 
-    // Один и тот же ресурс - одно предупреждение.
     await expect(client.post('/orders', { a: 1 })).rejects.toBeDefined();
     await expect(client.post('/orders', { a: 2 })).rejects.toBeDefined();
     await expect(client.post('/orders', { a: 3 })).rejects.toBeDefined();
     expect(warn).toHaveBeenCalledTimes(1);
 
-    // Разные ресурсы - разные предупреждения; динамические id внутри
-    // одного ресурса схлопываются.
     await expect(client.delete('/sessions/1')).rejects.toBeDefined();
     await expect(client.delete('/sessions/2')).rejects.toBeDefined();
     await expect(client.delete('/sessions/3')).rejects.toBeDefined();
@@ -740,7 +728,6 @@ describe('retry - warnOnUnsafeRetry', () => {
 
 describe('retry - потоковые тела', () => {
   it('не повторяет стримы при ошибках', async () => {
-    // Web ReadableStream + network error.
     let attempts1 = 0;
     const mock1 = createMockFetch(() => {
       attempts1++;
@@ -767,7 +754,6 @@ describe('retry - потоковые тела', () => {
     expect(warn1).toHaveBeenCalledTimes(1);
     expect(warn1.mock.calls[0]?.[0]).toMatch(/stream/);
 
-    // Node stream.Readable + 5xx.
     let attempts2 = 0;
     const mock2 = createMockFetch(() => {
       attempts2++;

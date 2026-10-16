@@ -146,13 +146,6 @@ export interface RequestConfig {
   credentials?: RequestCredentials;
 
   /**
-   * Выставляется requestWithMeta, head и options.
-   *
-   * @internal
-   */
-  includeResponseMeta?: true;
-
-  /**
    * Формат массивов в query. Переопределяет настройку клиента
    * для конкретного запроса.
    */
@@ -174,11 +167,23 @@ export interface RequestConfig {
 }
 
 /**
+ * Конфиг с флагом возврата метаданных. Используется внутри
+ * requestWithMeta, head и options: публичный RequestConfig его
+ * не содержит, чтобы случайная передача из JS не давала
+ * ResponseWithMeta там, где ожидается чистое тело.
+ *
+ * @internal
+ */
+export interface InternalRequestConfig extends RequestConfig {
+  includeResponseMeta?: true;
+}
+
+/**
  * Внутренний конфиг: заголовки нормализованы в Record. Этот тип
  * получают слои и транспорт после того, как client.ts вызвал
  * mergeHeaders на публичном RequestConfig.
  */
-export interface ResolvedRequestConfig extends Omit<RequestConfig, 'headers'> {
+export interface ResolvedRequestConfig extends Omit<InternalRequestConfig, 'headers'> {
   headers?: Record<string, string>;
 
   /**
@@ -200,10 +205,7 @@ export interface ResolvedRequestConfig extends Omit<RequestConfig, 'headers'> {
  * в методах вида client.get, где path и method задаются самим
  * методом, а body передаётся отдельным аргументом.
  */
-export type RequestOptions = Omit<
-  RequestConfig,
-  'path' | 'method' | 'body' | 'includeResponseMeta'
->;
+export type RequestOptions = Omit<RequestConfig, 'path' | 'method' | 'body'>;
 
 /**
  * Низкоуровневая функция запроса, из которой строится pipeline.

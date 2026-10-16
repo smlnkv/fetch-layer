@@ -8,6 +8,7 @@ import type { Layer, LayerContext } from './core/layer';
 import type {
   Client,
   HttpMethod,
+  InternalRequestConfig,
   RequestConfig,
   RequestOptions,
   ResolvedRequestConfig,
@@ -17,12 +18,12 @@ import type {
 const MIN_TIMEOUT_MS = 100;
 
 /**
- * Публичная функция запроса: принимает RequestConfig с любым
- * HeadersInit. Внутренний RequestFn работает с ResolvedRequestConfig,
- * где заголовки уже Record. Эти два типа несовместимы напрямую,
- * поэтому публичная функция вводится локально, без экспорта.
+ * Публичная функция запроса: принимает InternalRequestConfig.
+ * Внутренние методы (requestWithMeta, head, options) добавляют
+ * includeResponseMeta перед вызовом. Публичный client.request
+ * принимает RequestConfig без этого поля.
  */
-type PublicRequestFn = <T = unknown>(config: RequestConfig) => Promise<T>;
+type PublicRequestFn = <T = unknown>(config: InternalRequestConfig) => Promise<T>;
 
 /** Настройки клиента: все поля TransportOptions плюс warn и layers. */
 export interface ClientOptions extends TransportOptions {
@@ -49,7 +50,7 @@ export interface ClientOptions extends TransportOptions {
  * нормализуются в Record. undefined остаётся undefined, чтобы
  * слои не видели пустой объект вместо отсутствия заголовков.
  */
-function resolveConfig(config: RequestConfig): ResolvedRequestConfig {
+function resolveConfig(config: InternalRequestConfig): ResolvedRequestConfig {
   return {
     ...config,
     headers: config.headers ? mergeHeaders(config.headers) : undefined,
@@ -94,7 +95,7 @@ export function createClient(options: ClientOptions): Client {
   const baseRequest = createBaseRequest(options);
   const { pipeline, states } = applyLayers(baseRequest, layers, context);
 
-  const wrapped: PublicRequestFn = async <T>(config: RequestConfig): Promise<T> => {
+  const wrapped: PublicRequestFn = async <T>(config: InternalRequestConfig): Promise<T> => {
     const resolved = resolveConfig(config);
 
     let finalConfig: ResolvedRequestConfig;
