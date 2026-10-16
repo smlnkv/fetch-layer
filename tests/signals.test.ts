@@ -25,6 +25,38 @@ describe('sleep', () => {
       vi.useRealTimers();
     }
   });
+
+  it('reason не-Error подменяется на AbortError', async () => {
+    const stringReason = new AbortController();
+    stringReason.abort('user navigated away');
+
+    try {
+      await sleep(1000, stringReason.signal);
+      expect.fail('should have thrown');
+    } catch (e) {
+      expect(e).toBeInstanceOf(DOMException);
+      expect((e as DOMException).name).toBe('AbortError');
+    }
+
+    vi.useFakeTimers();
+    try {
+      const numberReason = new AbortController();
+      const promise = sleep(1000, numberReason.signal);
+      promise.catch(() => {});
+      await vi.advanceTimersByTimeAsync(100);
+      numberReason.abort(42);
+
+      try {
+        await promise;
+        expect.fail('should have thrown');
+      } catch (e) {
+        expect(e).toBeInstanceOf(DOMException);
+        expect((e as DOMException).name).toBe('AbortError');
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('throwIfAborted', () => {

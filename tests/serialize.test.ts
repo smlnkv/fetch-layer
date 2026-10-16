@@ -166,3 +166,24 @@ describe('stableSerialize - BigInt', () => {
     );
   });
 });
+
+describe('stableSerialize - глубокая вложенность', () => {
+  it('RangeError от переполнения стека оборачивается в ApiError, не вылетает сырым', () => {
+    let deep: unknown = 'leaf';
+    for (let i = 0; i < 100_000; i++) {
+      deep = { nested: deep };
+    }
+
+    try {
+      stableSerialize(deep);
+      expect.fail('should have thrown');
+    } catch (e) {
+      expect(e).toMatchObject({
+        name: 'ApiError',
+        kind: 'serialize',
+        code: 'BODY_SERIALIZATION_ERROR',
+      });
+      expect((e as { cause?: unknown }).cause).toBeInstanceOf(RangeError);
+    }
+  });
+});

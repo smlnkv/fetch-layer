@@ -146,7 +146,6 @@ describe('client - ошибки', () => {
   });
 
   it('HTTP_{status} как fallback code и plain-text ошибки в message', async () => {
-    // Пустое тело: code и message формируются из статуса.
     const mock1 = createMockFetch(() => ({ status: 500, body: {} }));
     const client1 = createTestClient({ fetch: mock1.fetch });
     await expect(client1.get('/users')).rejects.toMatchObject({
@@ -154,7 +153,6 @@ describe('client - ошибки', () => {
       message: 'HTTP 500',
     });
 
-    // Plain-text тело: message от сервера, rawBody сохраняет строку.
     const mock2 = createMockFetch(() => ({
       status: 500,
       bodyAsText: 'database is down',
@@ -441,7 +439,6 @@ describe('client - timeoutMs', () => {
   });
 
   it('per-request timeoutMs переопределяет клиентский', async () => {
-    // Больше клиентского: запрос успешен.
     vi.useFakeTimers();
     try {
       const mock1 = createMockFetch(
@@ -461,7 +458,6 @@ describe('client - timeoutMs', () => {
       vi.useRealTimers();
     }
 
-    // Меньше клиентского: падает.
     vi.useFakeTimers();
     try {
       const mock2 = createMockFetch(
@@ -481,6 +477,63 @@ describe('client - timeoutMs', () => {
         kind: 'timeout',
         code: 'TIMEOUT',
       });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('client - таймаут во время чтения тела', () => {
+  it('классифицируется как TIMEOUT, не PARSE_ERROR', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = vi.fn(
+        async (_input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+          const signal = init?.signal;
+          const stream = new ReadableStream({
+            start(controller) {
+              const timer = setTimeout(() => {
+                controller.enqueue(new TextEncoder().encode('{"id":"1"}'));
+                controller.close();
+              }, 5000);
+
+              signal?.addEventListener(
+                'abort',
+                () => {
+                  clearTimeout(timer);
+                  controller.error(signal.reason);
+                },
+                { once: true },
+              );
+            },
+          });
+
+          return new Response(stream, {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        },
+      );
+
+      const client = createTestClient({
+        fetch: fetchImpl as unknown as typeof fetch,
+        timeoutMs: 100,
+      });
+
+      const promise = client.get<{ id: string }>('/slow-body');
+      promise.catch(() => {});
+
+      await vi.advanceTimersByTimeAsync(200);
+
+      try {
+        await promise;
+        expect.fail('should have thrown');
+      } catch (e) {
+        const err = toApiError(e);
+        expect(err.kind).toBe('timeout');
+        expect(err.code).toBe('TIMEOUT');
+        expect(err.status).not.toBe(200);
+      }
     } finally {
       vi.useRealTimers();
     }
@@ -552,7 +605,6 @@ describe('client - signal', () => {
   });
 
   it('внешний signal + timeout: побеждает первый сработавший', async () => {
-    // Побеждает таймаут.
     vi.useFakeTimers();
     try {
       const controller = new AbortController();
@@ -582,7 +634,6 @@ describe('client - signal', () => {
       vi.useRealTimers();
     }
 
-    // Побеждает внешний abort.
     vi.useFakeTimers();
     try {
       const controller = new AbortController();

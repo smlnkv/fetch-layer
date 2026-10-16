@@ -10,14 +10,26 @@ export function throwIfAborted(signal?: AbortSignal): void {
 }
 
 /**
+ * Причина отмены. AbortController.abort принимает любое значение,
+ * поэтому reason может оказаться строкой или числом. Для таких
+ * значений подставляется AbortError: классификатор ошибок
+ * распознаёт отмену по имени, иначе она стала бы kind unknown.
+ */
+function abortReason(signal: AbortSignal, fallback: string): unknown {
+  const reason = signal.reason;
+  if (reason instanceof Error) return reason;
+  return new DOMException(fallback, 'AbortError');
+}
+
+/**
  * Пауза с поддержкой отмены. Сохраняет reason отменённого сигнала:
  * таймаут остаётся kind timeout, а не превращается в kind abort.
  *
- * Отклоняется с signal.reason, если он задан, иначе с AbortError.
+ * Отклоняется с reason сигнала, если он задан, иначе с AbortError.
  */
 export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) {
-    return Promise.reject(signal.reason ?? new DOMException('Sleep aborted', 'AbortError'));
+    return Promise.reject(abortReason(signal, 'Sleep aborted'));
   }
 
   if (!signal) {
@@ -34,7 +46,7 @@ export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 
     const onAbort = () => {
       clearTimeout(timer);
-      reject(signal.reason ?? new DOMException('Sleep aborted', 'AbortError'));
+      reject(abortReason(signal, 'Sleep aborted'));
     };
 
     signal.addEventListener('abort', onAbort, { once: true });

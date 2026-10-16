@@ -24,15 +24,13 @@ export function stableSerialize(value: unknown): string {
   try {
     return serialize(value, new WeakSet<object>()) ?? 'null';
   } catch (e) {
-    if (e instanceof TypeError) {
-      throw new ApiError({
-        kind: 'serialize',
-        code: 'BODY_SERIALIZATION_ERROR',
-        message: 'Failed to serialize value',
-        cause: e,
-      });
-    }
-    throw e;
+    if (e instanceof ApiError) throw e;
+    throw new ApiError({
+      kind: 'serialize',
+      code: 'BODY_SERIALIZATION_ERROR',
+      message: 'Failed to serialize value',
+      cause: e,
+    });
   }
 }
 

@@ -1,4 +1,4 @@
-import { ApiError } from '../core/errors';
+import { ApiError, toApiError } from '../core/errors';
 import {
   classifyBody,
   getTypeName,
@@ -107,9 +107,6 @@ function prepareJsonBody(value: unknown): PreparedBody {
     });
 
     if (json === undefined) {
-      // JSON.stringify(undefined), JSON.stringify(() => {}),
-      // JSON.stringify(Symbol()) дают undefined. Значение не должно
-      // было попасть сюда, но если это случилось - считаем ошибкой.
       throw new TypeError('JSON.stringify returned undefined');
     }
 
@@ -129,28 +126,27 @@ function prepareJsonBody(value: unknown): PreparedBody {
 }
 
 /**
- * Разбирает тело успешного ответа согласно responseType. Для stream
- * возвращает response.body или null, если тела нет.
+ * Разбирает тело ответа согласно responseType. Для stream
+ * возвращает response.body или null.
  *
- * Для json тело читается как текст, чтобы отличить пустой ответ
- * от невалидного. Пустая строка даёт undefined - это покрывает
- * DELETE и подобные эндпоинты, отвечающие 200 OK с Content-Length: 0.
- * Невалидный JSON даёт PARSE_ERROR с указанием content-type:
- * если сервер вернул HTML, это видно сразу.
+ * Для json пустое тело даёт undefined, невалидное - PARSE_ERROR
+ * с указанием content-type. Для 2xx и 5xx ошибка помечается
+ * isUncertain: true, для 4xx - false.
  *
- * Проверка `!response.body` в transport.ts отсекает 204, 304 и HEAD
- * до вызова этой функции.
- *
- * @throws ApiError с кодом PARSE_ERROR, если тело не удалось
- *   разобрать. Для 2xx и 5xx ошибка помечается isUncertain: true -
- *   ответ получен, но его содержимое неизвестно, и состояние
- *   операции на сервере тоже неизвестно. Для 4xx сервер явно
- *   отверг операцию, isUncertain: false.
+ * @param signal - отмена во время чтения классифицируется как
+ *   abort или timeout, а не как ошибка разбора. Для ветки stream
+ *   отмена проверяется до возврата тела: иначе вызывающий получил
+ *   бы поток при уже сработавшем таймауте.
  */
 export async function parseResponse(
   response: Response,
   responseType: ResponseType,
+  signal?: AbortSignal,
 ): Promise<unknown> {
+  if (signal?.aborted) {
+    throw toApiError(signal.reason);
+  }
+
   try {
     switch (responseType) {
       case 'json': {
@@ -168,6 +164,10 @@ export async function parseResponse(
         return response.body;
     }
   } catch (e) {
+    if (signal?.aborted) {
+      throw toApiError(signal.reason);
+    }
+
     const contentType = response.headers.get('content-type');
     throw new ApiError({
       kind: 'parse',
@@ -183,12 +183,17 @@ export async function parseResponse(
 }
 
 /**
- * Тело ошибки: сначала как текст, потом попытка разобрать как JSON.
- * В rawBody попадает либо распарсенный объект, либо исходная строка.
+ * Тело ошибки: текст, затем попытка JSON.parse. Возвращает
+ * распарсенное значение или исходную строку, null - если тело
+ * пустое или чтение не удалось.
  *
- * Возвращает null, если тело пустое или чтение не удалось.
+ * @param signal - отмена во время чтения пробрасывается как
+ *   ApiError, а не возвращает null.
  */
-export async function readBodyAsJsonOrText(response: Response): Promise<unknown> {
+export async function readBodyAsJsonOrText(
+  response: Response,
+  signal?: AbortSignal,
+): Promise<unknown> {
   try {
     const text = await response.text();
     if (!text) return null;
@@ -198,6 +203,9 @@ export async function readBodyAsJsonOrText(response: Response): Promise<unknown>
       return text;
     }
   } catch {
+    if (signal?.aborted) {
+      throw toApiError(signal.reason);
+    }
     return null;
   }
 }

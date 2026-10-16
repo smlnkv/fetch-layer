@@ -146,8 +146,6 @@ describe('parseResponse', () => {
     });
     expect(await parseResponse(arrResponse, 'json')).toEqual([1, 2, 3]);
 
-    // Пустое тело - валидное отсутствие данных: DELETE 200 OK
-    // с Content-Length: 0 не должен давать PARSE_ERROR.
     const empty = new Response('', {
       status: 200,
       headers: { 'content-type': 'application/json' },
@@ -187,6 +185,44 @@ describe('parseResponse', () => {
   });
 });
 
+describe('parseResponse - отмена сигнала', () => {
+  it('отменённый сигнал для responseType stream не возвращает тело', async () => {
+    const controller = new AbortController();
+    controller.abort(new DOMException('Timeout', 'TimeoutError'));
+
+    const response = new Response('content', { status: 200 });
+
+    await expect(parseResponse(response, 'stream', controller.signal)).rejects.toMatchObject({
+      kind: 'timeout',
+      code: 'TIMEOUT',
+    });
+  });
+
+  it('отмена во время чтения json-тела классифицируется как timeout, не parse', async () => {
+    const controller = new AbortController();
+
+    const response = new Response(
+      new ReadableStream({
+        pull() {
+          controller.abort(new DOMException('Timeout', 'TimeoutError'));
+          throw new DOMException('Timeout', 'TimeoutError');
+        },
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    );
+
+    try {
+      await parseResponse(response, 'json', controller.signal);
+      expect.fail('should have thrown');
+    } catch (e) {
+      const err = e as ApiError;
+      expect(err.kind).toBe('timeout');
+      expect(err.code).toBe('TIMEOUT');
+      expect(err.status).not.toBe(200);
+    }
+  });
+});
+
 describe('readBodyAsJsonOrText', () => {
   it('валидный JSON, не-JSON, пустое тело', async () => {
     expect(await readBodyAsJsonOrText(new Response(JSON.stringify({ code: 'X' })))).toEqual({
@@ -199,5 +235,24 @@ describe('readBodyAsJsonOrText', () => {
       '<html>Error</html>',
     );
     expect(await readBodyAsJsonOrText(new Response(''))).toBeNull();
+  });
+
+  it('отмена во время чтения тела ошибки пробрасывается, не возвращает null', async () => {
+    const controller = new AbortController();
+
+    const response = new Response(
+      new ReadableStream({
+        pull() {
+          controller.abort(new DOMException('Timeout', 'TimeoutError'));
+          throw new DOMException('Timeout', 'TimeoutError');
+        },
+      }),
+      { status: 500 },
+    );
+
+    await expect(readBodyAsJsonOrText(response, controller.signal)).rejects.toMatchObject({
+      kind: 'timeout',
+      code: 'TIMEOUT',
+    });
   });
 });

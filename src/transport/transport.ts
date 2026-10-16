@@ -83,37 +83,9 @@ export function createBaseRequest(options: TransportOptions): RequestFn {
     throwIfAborted(config.signal);
 
     const method = config.method ?? 'GET';
-    const url = buildUrl(
-      baseUrl,
-      config.path,
-      config.query,
-      config.queryArrayFormat ?? defaultArrayFormat,
-      config.queryObjectFormat ?? defaultObjectFormat,
-    );
 
-    // У HEAD и OPTIONS тела нет, парсить как JSON нельзя.
-    const defaultResponseType: ResponseType =
-      method === 'HEAD' || method === 'OPTIONS' ? 'text' : 'json';
-    const responseType: ResponseType = config.responseType ?? defaultResponseType;
-
-    const includeMeta = config.includeResponseMeta === true;
-
-    const defaultAccept =
-      responseType === 'json' ? 'application/json' : responseType === 'text' ? 'text/plain' : '*/*';
-
-    // Порядок слияния: Accept -> defaultHeaders -> config.headers.
-    // Сгенерированные слоями заголовки (Idempotency-Key, Authorization)
-    // переопределяют defaultHeaders, поэтому случайный Idempotency-Key
-    // в defaultHeaders не сломает дедупликацию.
-    const headers = mergeHeaders({ Accept: defaultAccept }, defaultHeaders, config.headers);
-
-    // prepareBody вне try: ошибка сериализации тела выбрасывается
-    // до формирования финальных заголовков.
-    const { body, contentType } = prepareBody(config.body);
-    if (contentType !== undefined && getHeader(headers, 'Content-Type') === undefined) {
-      setHeader(headers, 'Content-Type', contentType);
-    }
-
+    // Таймер поднимается до try: buildUrl и prepareBody тоже внутри
+    // try, а finally должен видеть timeout в любой ветке.
     const effectiveTimeoutMs = config.timeoutMs ?? defaultTimeoutMs;
     const timeout = setAbortTimeout(effectiveTimeoutMs);
 
@@ -125,6 +97,39 @@ export function createBaseRequest(options: TransportOptions): RequestFn {
       : timeout.signal;
 
     try {
+      const url = buildUrl(
+        baseUrl,
+        config.path,
+        config.query,
+        config.queryArrayFormat ?? defaultArrayFormat,
+        config.queryObjectFormat ?? defaultObjectFormat,
+      );
+
+      // У HEAD и OPTIONS тела нет, парсить как JSON нельзя.
+      const defaultResponseType: ResponseType =
+        method === 'HEAD' || method === 'OPTIONS' ? 'text' : 'json';
+      const responseType: ResponseType = config.responseType ?? defaultResponseType;
+
+      const includeMeta = config.includeResponseMeta === true;
+
+      const defaultAccept =
+        responseType === 'json'
+          ? 'application/json'
+          : responseType === 'text'
+            ? 'text/plain'
+            : '*/*';
+
+      // Порядок слияния: Accept -> defaultHeaders -> config.headers.
+      // Сгенерированные слоями заголовки (Idempotency-Key, Authorization)
+      // переопределяют defaultHeaders, поэтому случайный Idempotency-Key
+      // в defaultHeaders не сломает дедупликацию.
+      const headers = mergeHeaders({ Accept: defaultAccept }, defaultHeaders, config.headers);
+
+      const { body, contentType } = prepareBody(config.body);
+      if (contentType !== undefined && getHeader(headers, 'Content-Type') === undefined) {
+        setHeader(headers, 'Content-Type', contentType);
+      }
+
       const init: RequestInit = {
         ...config.fetchOptions,
         method,
@@ -170,7 +175,7 @@ export function createBaseRequest(options: TransportOptions): RequestFn {
       }
 
       if (!response.ok) {
-        const rawBody = await readBodyAsJsonOrText(response);
+        const rawBody = await readBodyAsJsonOrText(response, signal);
         const parsed = errorParser(rawBody);
         throw new ApiError({
           kind: 'http',
@@ -196,7 +201,7 @@ export function createBaseRequest(options: TransportOptions): RequestFn {
         return undefined as T;
       }
 
-      const data = await parseResponse(response, responseType);
+      const data = await parseResponse(response, responseType, signal);
 
       if (includeMeta) {
         return { data, meta } as unknown as T;
