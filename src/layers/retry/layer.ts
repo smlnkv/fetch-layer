@@ -230,7 +230,7 @@ export function withRetry(options: RetryOptions = {}): Layer {
             warnedStreamNoRetry = true;
             safeCall(() =>
               warn?.(
-                '[fetch-layer] withRetry is enabled, but the request body is a stream. ' +
+                '[fetch-layers] withRetry is enabled, but the request body is a stream. ' +
                   'Streams are single-use; retries are disabled for this request. ' +
                   'Use skipRetry: true to silence this warning, or pre-buffer the stream.',
               ),
@@ -257,7 +257,7 @@ export function withRetry(options: RetryOptions = {}): Layer {
         ) {
           warnUnsafeRetryOnce(
             `retry-unsafe:${method}:${rootSegment(initialConfig.path)}`,
-            `[fetch-layer] Retry is enabled for ${method} ${initialConfig.path} ` +
+            `[fetch-layers] Retry is enabled for ${method} ${initialConfig.path} ` +
               `without the ${DEFAULT_IDEMPOTENCY_HEADER} header. On a network failure ` +
               `the retry may create a duplicate. Add the header or disable retry ` +
               `with skipRetry.`,
@@ -286,7 +286,7 @@ export function withRetry(options: RetryOptions = {}): Layer {
             } catch (policyError) {
               safeCall(() =>
                 warn?.(
-                  `[fetch-layer] withRetry: shouldRetry threw, falling back to default. ` +
+                  `[fetch-layers] withRetry: shouldRetry threw, falling back to default. ` +
                     `${policyError instanceof Error ? policyError.message : String(policyError)}`,
                 ),
               );
@@ -308,7 +308,7 @@ export function withRetry(options: RetryOptions = {}): Layer {
               } catch (policyError) {
                 safeCall(() =>
                   warn?.(
-                    `[fetch-layer] withRetry: computeDelay threw, falling back to default. ` +
+                    `[fetch-layers] withRetry: computeDelay threw, falling back to default. ` +
                       `${policyError instanceof Error ? policyError.message : String(policyError)}`,
                   ),
                 );

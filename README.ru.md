@@ -1,4 +1,4 @@
-# fetch-layer
+# fetch-layers
 
 [English](./README.md) | **Русский**
 
@@ -93,11 +93,11 @@ HTTP-клиент, который собирается из слоёв. Кажд
 ## Установка и первый запрос
 
 ```
-npm install fetch-layer
+npm install fetch-layers
 ```
 
 ```ts
-import { createClient } from 'fetch-layer';
+import { createClient } from 'fetch-layers';
 
 const client = createClient({ baseUrl: '/api' });
 
@@ -117,13 +117,13 @@ const review = await client.post('/reviews', {
 Опция `layers` принимает массив слоёв в порядке от самого внешнего к самому внутреннему:
 
 ```ts
-import { createClient } from 'fetch-layer';
+import { createClient } from 'fetch-layers';
 import {
   withAuth,
   withRetry,
   withIdempotency,
   sessionStorageSource,
-} from 'fetch-layer/layers';
+} from 'fetch-layers/layers';
 
 const client = createClient({
   baseUrl: '/api',
@@ -161,24 +161,24 @@ const client = createClient({
 
 | Модуль                    | Что экспортирует                                                                                          |
 | ------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `fetch-layer`             | `createClient`, `ApiError`, `toApiError`, `ErrorBodyParser`, хранилища и публичные типы                   |
-| `fetch-layer/layers`      | Фабрики всех встроенных слоёв и источники ключей идемпотентности                                          |
-| `fetch-layer/auth`        | Типы `SessionProvider`, `RefreshResult`, `SessionExpiredReason`, `resetRefreshCircuit`                    |
-| `fetch-layer/idempotency` | `IdempotencySource`, `IdempotencyContext`, `IdempotencyOutcome`, `createSessionSource`, `stableSerialize` |
-| `fetch-layer/retry`       | Только `withRetry` и его опции                                                                            |
-| `fetch-layer/storage`     | `StorageLike`, `createMemoryStorage`, `fromWebStorage`                                                    |
+| `fetch-layers`             | `createClient`, `ApiError`, `toApiError`, `ErrorBodyParser`, хранилища и публичные типы                   |
+| `fetch-layers/layers`      | Фабрики всех встроенных слоёв и источники ключей идемпотентности                                          |
+| `fetch-layers/auth`        | Типы `SessionProvider`, `RefreshResult`, `SessionExpiredReason`, `resetRefreshCircuit`                    |
+| `fetch-layers/idempotency` | `IdempotencySource`, `IdempotencyContext`, `IdempotencyOutcome`, `createSessionSource`, `stableSerialize` |
+| `fetch-layers/retry`       | Только `withRetry` и его опции                                                                            |
+| `fetch-layers/storage`     | `StorageLike`, `createMemoryStorage`, `fromWebStorage`                                                    |
 
 ### Прямые импорты для минимального размера
 
-`fetch-layer/layers` реэкспортирует все три слоя. Если используете только один, импортируйте его напрямую: бандлер не потянет остальные.
+`fetch-layers/layers` реэкспортирует все три слоя. Если используете только один, импортируйте его напрямую: бандлер не потянет остальные.
 
 ```ts
-import { withRetry } from 'fetch-layer/retry';
-import { withAuth } from 'fetch-layer/auth';
-import { withIdempotency, sessionStorageSource } from 'fetch-layer/idempotency';
+import { withRetry } from 'fetch-layers/retry';
+import { withAuth } from 'fetch-layers/auth';
+import { withIdempotency, sessionStorageSource } from 'fetch-layers/idempotency';
 ```
 
-`fetch-layer/layers` остаётся удобным вариантом для типового случая: один импорт вместо трёх.
+`fetch-layers/layers` остаётся удобным вариантом для типового случая: один импорт вместо трёх.
 
 ## Как устроены слои
 
@@ -204,7 +204,7 @@ import { withIdempotency, sessionStorageSource } from 'fetch-layer/idempotency';
 
 ## Совместная работа с TanStack Query
 
-fetch-layer встраивается в `queryFn` и `mutationFn`.
+fetch-layers встраивается в `queryFn` и `mutationFn`.
 
 ```tsx
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -236,12 +236,12 @@ function useCreateOrder() {
 }
 ```
 
-`queryFn` получает `signal` от TanStack Query, fetch-layer его принимает и объединяет с внутренним таймаутом. Отмена работает в обе стороны.
+`queryFn` получает `signal` от TanStack Query, fetch-layers его принимает и объединяет с внутренним таймаутом. Отмена работает в обе стороны.
 
-Основной конфликт - retry. У TanStack Query есть свой retry для `useQuery`, у fetch-layer - свой для HTTP. Если оба включены, 3 попытки x 3 попытки = 9 запросов. Оставьте retry в одном месте:
+Основной конфликт - retry. У TanStack Query есть свой retry для `useQuery`, у fetch-layers - свой для HTTP. Если оба включены, 3 попытки x 3 попытки = 9 запросов. Оставьте retry в одном месте:
 
 ```ts
-// Retry в fetch-layer, TanStack Query без retry.
+// Retry в fetch-layers, TanStack Query без retry.
 const client = createClient({
   baseUrl: '/api',
   layers: [withRetry({ maxAttempts: 3 })],

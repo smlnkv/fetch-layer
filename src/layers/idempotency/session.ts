@@ -56,7 +56,7 @@ type Store = Record<string, StoredEntry>;
  * it is kept for the retry.
  *
  * Ready factories for sessionStorage, localStorage and memory live
- * in fetch-layer/layers.
+ * in fetch-layers/layers.
  *
  * @throws Error if maxEntries is below 1.
  */
@@ -214,6 +214,6 @@ function defaultGenerateKey(): string {
     return crypto.randomUUID();
   }
   throw new Error(
-    'crypto.randomUUID is not available. fetch-layer requires Node >= 20 or a modern browser.',
+    'crypto.randomUUID is not available. fetch-layers requires Node >= 20 or a modern browser.',
   );
 }

@@ -1,5 +1,5 @@
 {
-  "name": "fetch-layer",
+  "name": "fetch-layers",
   "version": "1.0.0",
   "description": "Thin typed HTTP client for browser and Node with composable layers: auth, idempotency, retry. Zero dependencies, ESM only.",
   "keywords": [
@@ -21,13 +21,13 @@
     "email": "smlnkv79@gmail.com",
     "url": "https://github.com/smlnkv"
   },
-  "homepage": "https://github.com/smlnkv/fetch-layer#readme",
+  "homepage": "https://github.com/smlnkv/fetch-layers#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/smlnkv/fetch-layer.git"
+    "url": "git+https://github.com/smlnkv/fetch-layers.git"
   },
   "bugs": {
-    "url": "https://github.com/smlnkv/fetch-layer/issues"
+    "url": "https://github.com/smlnkv/fetch-layers/issues"
   },
   "type": "module",
   "sideEffects": false,

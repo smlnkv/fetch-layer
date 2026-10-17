@@ -134,7 +134,7 @@ export function withAuth(options: AuthOptions): Layer {
           if (manager.isRefreshSignal(config.signal)) {
             safeCall(() =>
               context.warn?.(
-                '[fetch-layer] withAuth: 401 inside provider.refresh. ' +
+                '[fetch-layers] withAuth: 401 inside provider.refresh. ' +
                   'Use a separate client without withAuth for the refresh endpoint.',
               ),
             );

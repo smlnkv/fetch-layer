@@ -1,4 +1,4 @@
-# fetch-layer
+# fetch-layers
 
 **English** | [Русский](./README.ru.md)
 
@@ -93,11 +93,11 @@ Token refresh may fail: network is down, refresh endpoint returns 5xx. Without p
 ## Install and first request
 
 ```
-npm install fetch-layer
+npm install fetch-layers
 ```
 
 ```ts
-import { createClient } from 'fetch-layer';
+import { createClient } from 'fetch-layers';
 
 const client = createClient({ baseUrl: '/api' });
 
@@ -117,13 +117,13 @@ Both methods return the parsed response body. `post` sends an object as JSON. An
 The `layers` option takes an array of layers, ordered from outermost to innermost:
 
 ```ts
-import { createClient } from 'fetch-layer';
+import { createClient } from 'fetch-layers';
 import {
   withAuth,
   withRetry,
   withIdempotency,
   sessionStorageSource,
-} from 'fetch-layer/layers';
+} from 'fetch-layers/layers';
 
 const client = createClient({
   baseUrl: '/api',
@@ -161,24 +161,24 @@ The library is split into modules. Bundle size depends on what you import.
 
 | Module                    | What it exports                                                                                           |
 | ------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `fetch-layer`             | `createClient`, `ApiError`, `toApiError`, `ErrorBodyParser`, storages and public types                    |
-| `fetch-layer/layers`      | Factories for all built-in layers and idempotency key sources                                             |
-| `fetch-layer/auth`        | Types `SessionProvider`, `RefreshResult`, `SessionExpiredReason`, `resetRefreshCircuit`                   |
-| `fetch-layer/idempotency` | `IdempotencySource`, `IdempotencyContext`, `IdempotencyOutcome`, `createSessionSource`, `stableSerialize` |
-| `fetch-layer/retry`       | Only `withRetry` and its options                                                                          |
-| `fetch-layer/storage`     | `StorageLike`, `createMemoryStorage`, `fromWebStorage`                                                    |
+| `fetch-layers`             | `createClient`, `ApiError`, `toApiError`, `ErrorBodyParser`, storages and public types                    |
+| `fetch-layers/layers`      | Factories for all built-in layers and idempotency key sources                                             |
+| `fetch-layers/auth`        | Types `SessionProvider`, `RefreshResult`, `SessionExpiredReason`, `resetRefreshCircuit`                   |
+| `fetch-layers/idempotency` | `IdempotencySource`, `IdempotencyContext`, `IdempotencyOutcome`, `createSessionSource`, `stableSerialize` |
+| `fetch-layers/retry`       | Only `withRetry` and its options                                                                          |
+| `fetch-layers/storage`     | `StorageLike`, `createMemoryStorage`, `fromWebStorage`                                                    |
 
 ### Direct imports for a smaller bundle
 
-`fetch-layer/layers` re-exports all three layers. If you only use one, import it directly - the bundler won't pull the others in.
+`fetch-layers/layers` re-exports all three layers. If you only use one, import it directly - the bundler won't pull the others in.
 
 ```ts
-import { withRetry } from 'fetch-layer/retry';
-import { withAuth } from 'fetch-layer/auth';
-import { withIdempotency, sessionStorageSource } from 'fetch-layer/idempotency';
+import { withRetry } from 'fetch-layers/retry';
+import { withAuth } from 'fetch-layers/auth';
+import { withIdempotency, sessionStorageSource } from 'fetch-layers/idempotency';
 ```
 
-`fetch-layer/layers` remains convenient for the common case: one import instead of three.
+`fetch-layers/layers` remains convenient for the common case: one import instead of three.
 
 ## How layers work
 
@@ -204,7 +204,7 @@ Hooks and interceptors can only change data on the way in and out. They don't de
 
 ## Working with TanStack Query
 
-fetch-layer plugs into `queryFn` and `mutationFn`.
+fetch-layers plugs into `queryFn` and `mutationFn`.
 
 ```tsx
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -236,12 +236,12 @@ function useCreateOrder() {
 }
 ```
 
-`queryFn` gets `signal` from TanStack Query, fetch-layer accepts it and combines with its own timeout. Cancellation works both ways.
+`queryFn` gets `signal` from TanStack Query, fetch-layers accepts it and combines with its own timeout. Cancellation works both ways.
 
-The main conflict is retry. TanStack Query has its own retry for `useQuery`, fetch-layer has its own for HTTP. If both are enabled, 3 attempts x 3 attempts = 9 requests. Keep retry in one place:
+The main conflict is retry. TanStack Query has its own retry for `useQuery`, fetch-layers has its own for HTTP. If both are enabled, 3 attempts x 3 attempts = 9 requests. Keep retry in one place:
 
 ```ts
-// Retry in fetch-layer, TanStack Query without retry.
+// Retry in fetch-layers, TanStack Query without retry.
 const client = createClient({
   baseUrl: '/api',
   layers: [withRetry({ maxAttempts: 3 })],
