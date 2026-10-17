@@ -76,7 +76,7 @@ export function serializeQueryValue(
   }
 
   if (isQueryObject(value)) {
-    const entries = Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    const entries = Object.entries(value).sort(([a], [b]) => Number(a > b) - Number(a < b));
 
     switch (objectFormat) {
       case 'brackets': {

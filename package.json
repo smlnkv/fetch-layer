@@ -1,6 +1,6 @@
 {
   "name": "fetch-layer",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Thin typed HTTP client for browser and Node with composable layers: auth, idempotency, retry. Zero dependencies, ESM only.",
   "keywords": [
     "fetch",
@@ -66,6 +66,7 @@
   "files": [
     "dist",
     "README.md",
+    "README.ru.md",
     "LICENSE",
     "CHANGELOG.md"
   ],

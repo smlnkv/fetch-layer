@@ -60,6 +60,7 @@ export default [
       ],
 
       'import-x/no-cycle': 'error',
+      'import-x/no-default-export': 'error',
       'import-x/order': [
         'error',
         {
@@ -68,6 +69,9 @@ export default [
           alphabetize: { order: 'asc', caseInsensitive: true },
         },
       ],
+
+      'no-nested-ternary': 'error',
+      eqeqeq: ['error', 'always'],
 
       'no-console': ['warn', { allow: ['warn', 'error', 'info'] }],
       'prefer-const': 'error',
