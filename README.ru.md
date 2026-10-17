@@ -118,7 +118,12 @@ const review = await client.post('/reviews', {
 
 ```ts
 import { createClient } from 'fetch-layer';
-import { withAuth, withRetry, withIdempotency, sessionStorageSource } from 'fetch-layer/layers';
+import {
+  withAuth,
+  withRetry,
+  withIdempotency,
+  sessionStorageSource,
+} from 'fetch-layer/layers';
 
 const client = createClient({
   baseUrl: '/api',
@@ -138,7 +143,7 @@ const client = createClient({
 
 Порядок нельзя переставить произвольно - библиотека проверяет его при создании клиента. Если поменять `withIdempotency` и `withRetry` местами, ключ будет генерироваться заново на каждом повторе - это ошибка. `createClient` выбросит исключение с указанием, какой слой нарушил правило.
 
-Если слои не нужны, `createClient({ baseUrl: "/api" })` даёт чистый HTTP-клиент без авторизации, повторов и идемпотентности.
+Если слои не нужны, `createClient({ baseUrl: '/api' })` даёт чистый HTTP-клиент без авторизации, повторов и идемпотентности.
 
 ## Требования
 
@@ -148,7 +153,7 @@ const client = createClient({
 
 Пакет только ESM. CommonJS не поддерживается.
 
-`crypto.randomUUID` нужен только если подключён `withIdempotency` со встроенным генератором ключей. Проверяется при первом мутирующем запросе.
+`crypto.randomUUID` нужен только если подключён `withIdempotency` со встроенным генератором ключей. Библиотека проверяет его при первом мутирующем запросе.
 
 ## Модули
 
@@ -249,7 +254,7 @@ useQuery({
 });
 ```
 
-Остальное работает без адаптеров: `ApiError` пробрасывается в `error`, `signal` принимается как есть, Devtools показывает вызовы `queryFn` без изменений.
+Остальное работает без адаптеров: `ApiError` пробрасывается в `error`, `signal` принимается как есть, DevTools показывает вызовы `queryFn` без изменений.
 
 ## Лицензия
 
