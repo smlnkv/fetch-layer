@@ -1,40 +1,34 @@
 /**
- * Минимальный интерфейс синхронного key-value хранилища.
+ * Synchronous key-value storage. Compatible with localStorage and
+ * sessionStorage. Async storages (IndexedDB, AsyncStorage) need an
+ * adapter with a synchronous API.
  *
- * Совместим с localStorage и sessionStorage браузера. Для асинхронных
- * хранилищ (IndexedDB, AsyncStorage) нужен адаптер с синхронным API.
- *
- * Реализации должны выбрасывать исключение из setItem, если запись
- * не удалась: без сохранённого ключа повтор после потери ответа
- * создаст дубликат. Ошибки чтения и удаления не критичны:
- * getItem вернёт null, removeItem ничего не сделает.
+ * setItem must throw on write failure: without a saved key, a retry
+ * after a lost response creates a duplicate. Reads and deletes are
+ * not critical: getItem returns null, removeItem ignores errors.
  */
 export interface StorageLike {
   /**
-   * Значение по ключу или null. Может вернуть null и при ошибке
-   * чтения: отличить "нет ключа" от "ошибка чтения" нельзя.
+   * Value by key or null. Also null on read error: missing key and
+   * read error cannot be told apart.
    */
   getItem(key: string): string | null;
 
   /**
-   * Сохраняет значение.
+   * Saves a value.
    *
-   * @throws Может выбросить, если запись невозможна:
-   *   QuotaExceededError, хранилище только для чтения. Вызывающий
-   *   код должен прервать операцию.
+   * @throws When the write is impossible (QuotaExceededError,
+   *   read-only mode). The caller must abort the operation.
    */
   setItem(key: string, value: string): void;
 
-  /**
-   * Удаляет значение. Если ключа нет, ничего не делает.
-   * Ошибки удаления игнорируются.
-   */
+  /** Removes a value. Missing key and delete errors are ignored. */
   removeItem(key: string): void;
 }
 
 /**
- * Хранилище в оперативной памяти. Данные живут, пока живёт процесс.
- * Для восстановления после перезагрузки страницы не подходит.
+ * In-memory storage. Lives as long as the process; data is lost
+ * after page reload.
  */
 export function createMemoryStorage(): StorageLike {
   const map = new Map<string, string>();
@@ -51,17 +45,14 @@ export function createMemoryStorage(): StorageLike {
 }
 
 /**
- * Адаптер над localStorage или sessionStorage браузера.
+ * Adapter over localStorage or sessionStorage.
  *
- * Браузерные хранилища могут быть недоступны или работать
- * некорректно: приватный режим Safari, переполнение квоты,
- * отключённые cookies.
+ * Browser storages may be unavailable or misbehave: Safari private
+ * mode, quota overflow, disabled cookies.
  *
- * - getItem возвращает null при ошибке. Переиспользовать старую
- *   запись нельзя, будет создана новая;
- * - removeItem игнорирует ошибки: очистка идёт фоном;
- * - setItem выбрасывает исключение. Если ключ не сохранён,
- *   вызывающий код должен отказаться от операции.
+ * - getItem: null on error, the old record is not reused;
+ * - removeItem: errors are ignored, cleanup is not critical;
+ * - setItem: throws, the operation must be aborted.
  */
 export function fromWebStorage(webStorage: Storage): StorageLike {
   return {
@@ -74,8 +65,7 @@ export function fromWebStorage(webStorage: Storage): StorageLike {
     },
 
     setItem: (key, value) => {
-      // Без try/catch: если запись не удалась, исключение должно
-      // дойти до вызывающего кода.
+      // No try/catch: a write error must reach the caller.
       webStorage.setItem(key, value);
     },
 
@@ -83,7 +73,7 @@ export function fromWebStorage(webStorage: Storage): StorageLike {
       try {
         webStorage.removeItem(key);
       } catch {
-        // Очистка идёт в фоне, неудача не критична.
+        // Cleanup is not critical.
       }
     },
   };

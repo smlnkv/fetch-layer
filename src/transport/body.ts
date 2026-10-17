@@ -28,10 +28,9 @@ function unsupportedBodyError(name: string): ApiError {
 }
 
 /**
- * contentType === undefined означает, что транспорт не должен
- * выставлять заголовок: либо тело отсутствует, либо решение
- * принимает браузер (FormData с boundary), либо приложение уже
- * задало свой.
+ * contentType === undefined: transport does not set the header. No
+ * body, or the browser decides (FormData with boundary), or the app
+ * set its own.
  */
 export interface PreparedBody {
   body: BodyInit | undefined;
@@ -39,20 +38,18 @@ export interface PreparedBody {
 }
 
 /**
- * Определяет природу тела и готовит его для fetch. Возвращает тело
- * и рекомендованный Content-Type. Если приложение задало
- * Content-Type явно, транспорт его не перезаписывает.
+ * Prepares body for fetch. Returns body and recommended Content-Type.
+ * Explicit Content-Type from the app is not overwritten.
  *
- * Для стримов Content-Type не выставляется: поток может содержать
- * бинарные данные, текст, JSON Lines. Приложение задаёт тип явно,
- * если он важен для сервера.
+ * Streams get no Content-Type: a stream may carry binary data, text,
+ * JSON Lines. The type is set by the app when it matters to server.
  *
- * @throws ApiError с кодом BODY_SERIALIZATION_ERROR, если тело
- *   содержит Map, Set, WeakMap, WeakSet, RegExp или Error на верхнем
- *   уровне, либо любое значение, не сериализуемое в JSON, на любом
- *   уровне вложенности: Blob, File, FormData, ArrayBuffer, TypedArray,
- *   ReadableStream, URLSearchParams. JSON.stringify превратил бы
- *   их в {}, и сервер получил бы пустой объект вместо данных.
+ * @throws ApiError with code BODY_SERIALIZATION_ERROR if body
+ *   contains Map, Set, WeakMap, WeakSet, RegExp or Error at top
+ *   level, or any value not JSON-serializable at any nesting level:
+ *   Blob, File, FormData, ArrayBuffer, TypedArray, ReadableStream,
+ *   URLSearchParams. JSON.stringify would turn them into {}, and
+ *   server would get empty object instead of data.
  */
 export function prepareBody(value: unknown): PreparedBody {
   const kind = classifyBody(value);
@@ -126,17 +123,16 @@ function prepareJsonBody(value: unknown): PreparedBody {
 }
 
 /**
- * Разбирает тело ответа согласно responseType. Для stream
- * возвращает response.body или null.
+ * Parses response body according to responseType.
  *
- * Для json пустое тело даёт undefined, невалидное - PARSE_ERROR
- * с указанием content-type. Для 2xx и 5xx ошибка помечается
- * isUncertain: true, для 4xx - false.
+ * For json, empty body gives undefined, invalid - PARSE_ERROR with
+ * content-type in the message. For 2xx and 5xx the error is marked
+ * isUncertain: true, for 4xx - false.
  *
- * @param signal - отмена во время чтения классифицируется как
- *   abort или timeout, а не как ошибка разбора. Для ветки stream
- *   отмена проверяется до возврата тела: иначе вызывающий получил
- *   бы поток при уже сработавшем таймауте.
+ * @param signal - abort during read is classified as abort or
+ *   timeout, not as parse error. For the stream branch, abort is
+ *   checked before returning the body: otherwise the caller would
+ *   get a stream after the timeout already fired.
  */
 export async function parseResponse(
   response: Response,
@@ -183,12 +179,13 @@ export async function parseResponse(
 }
 
 /**
- * Тело ошибки: текст, затем попытка JSON.parse. Возвращает
- * распарсенное значение или исходную строку, null - если тело
- * пустое или чтение не удалось.
+ * Error body: text, then JSON.parse.
  *
- * @param signal - отмена во время чтения пробрасывается как
- *   ApiError, а не возвращает null.
+ * Returns parsed value or the original string, null if body is empty
+ * or read failed.
+ *
+ * @param signal - abort during read is thrown as ApiError, not
+ *   returned as null.
  */
 export async function readBodyAsJsonOrText(
   response: Response,

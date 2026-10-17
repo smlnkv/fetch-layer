@@ -1,93 +1,52 @@
 import type { HttpMethod, QueryParams } from '../../core/types';
 
-/**
- * Контекст, который слой идемпотентности передаёт источнику, чтобы
- * тот решил: сгенерировать новый ключ или переиспользовать прежний.
- */
+/** Input for the source: decide between a new key and the old one. */
 export interface IdempotencyContext {
   path: string;
 
-  /** HTTP-метод запроса. */
   method: HttpMethod;
 
-  /** Используется для вычисления отпечатка тела. */
+  /** Feeds the fingerprint. */
   body: unknown;
 
   /**
-   * Query-параметры запроса. Участвуют в вычислении отпечатка:
-   * POST /orders?type=a и POST /orders?type=b с одинаковым телом
-   * получают разные ключи.
-   *
-   * Если не заданы, отпечаток строится только по scope и телу.
+   * Feeds the fingerprint: POST /orders?type=a and POST /orders?type=b
+   * with the same body get different keys.
    */
   query?: QueryParams;
 
-  /**
-   * Явная область из RequestConfig.idempotencyScope. Если не задана,
-   * используется "${method} ${path}".
-   */
+  /** Explicit scope. Defaults to "${method} ${path}". */
   scope?: string;
 }
 
 /**
- * Состояние операции с точки зрения идемпотентности.
- *
- * - success: сервер подтвердил операцию, ключ больше не нужен;
- * - definite-failure: 4xx кроме 408 и 429. Операция не выполнена,
- *   ключ можно освободить;
- * - indefinite-failure: сеть, таймаут, 5xx, 408, 429, отмена.
- *   Неизвестно, дошёл ли запрос до сервера, ключ нужно сохранить.
+ * - success: server confirmed, the key is no longer needed;
+ * - definite-failure: 4xx except 408 and 429. The key can be released;
+ * - indefinite-failure: network, timeout, 5xx, 408, 429, cancel.
+ *   The key must be kept.
  */
 export type IdempotencyOutcome = 'success' | 'definite-failure' | 'indefinite-failure';
 
 /**
- * Источник ключей идемпотентности. Реализуется приложением или
- * берётся готовый createSessionSource.
+ * Idempotency key source. Implemented by the app or taken from
+ * createSessionSource.
  *
- * Методы синхронные: это гарантирует атомарность. Два параллельных
- * nextKey для одной пары (scope, отпечаток тела) не могут оба
- * увидеть "ключа нет". Для асинхронных хранилищ (AsyncStorage,
- * IndexedDB) держите синхронный кеш в памяти и записывайте
- * в основное хранилище фоном.
- *
- * nextKey либо сохраняет ключ до возврата, либо выбрасывает
- * исключение: повтор после потери ответа уйдёт с новым ключом
- * и создаст дубликат.
- *
- * Для тел без стабильного отпечатка (FormData, Blob, ArrayBuffer,
- * TypedArray, ReadableStream, URLSearchParams, Map, Set, WeakMap,
- * WeakSet, RegExp, Error) createSessionSource генерирует новый ключ
- * на каждый вызов и не сохраняет его: дедупликация для таких тел
- * невозможна.
+ * Methods are synchronous: two parallel nextKey calls for the same
+ * (scope, fingerprint) pair cannot both see that the key is missing.
  */
 export interface IdempotencySource {
   /**
-   * Новый или ранее сохранённый ключ для запроса.
+   * Key for the request: new or stored.
    *
-   * Вызывается только если приложение не задало заголовок
-   * идемпотентности само и запрос не помечен skipIdempotency.
-   * Если приложение установило заголовок вручную, источник
-   * к операции не привлекается, и resolve для неё не вызывается.
-   *
-   * @throws Может выбросить при ошибке хранилища. Клиент обернёт
-   *   исключение в ApiError и не отправит запрос: без сохранённого
-   *   ключа корректный повтор невозможен.
+   * @throws On storage error. The client wraps the exception in
+   *   ApiError and does not send the request.
    */
   nextKey(context: IdempotencyContext): string;
 
   /**
-   * Уведомляет источник о состоянии операции. Вызывается только
-   * для операций, где этот же источник вернул ключ из nextKey:
-   * освобождает ключ при success и definite-failure, сохраняет
-   * при indefinite-failure.
-   *
-   * Если приложение задало ключ вручную, resolve не вызывается:
-   * источник ключ не выдавал, и записи для этой операции у него
-   * нет. Для уведомления обо всех запросах (аудит, метрики)
-   * используйте отдельный слой.
-   *
-   * Исключения из метода игнорируются: очистка хранилища идёт
-   * фоном и не влияет на результат операции.
+   * Operation outcome. Releases the key on success and
+   * definite-failure, keeps it on indefinite-failure. Exceptions
+   * are ignored.
    */
   resolve?(context: IdempotencyContext, outcome: IdempotencyOutcome): void;
 }

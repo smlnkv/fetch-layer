@@ -1,8 +1,6 @@
 import { unrefTimer } from './timers';
 
-/**
- * Выбрасывает AbortError, если сигнал отменён.
- */
+/** Throws AbortError if signal is aborted. */
 export function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) {
     throw new DOMException('Request aborted', 'AbortError');
@@ -10,10 +8,10 @@ export function throwIfAborted(signal?: AbortSignal): void {
 }
 
 /**
- * Причина отмены. AbortController.abort принимает любое значение,
- * поэтому reason может оказаться строкой или числом. Для таких
- * значений подставляется AbortError: классификатор ошибок
- * распознаёт отмену по имени, иначе она стала бы kind unknown.
+ * Abort reason. AbortController.abort accepts any value, so reason
+ * can be a string or a number. Such values get AbortError instead:
+ * the error classifier detects abort by name, otherwise it would
+ * become kind unknown.
  */
 function abortReason(signal: AbortSignal, fallback: string): unknown {
   const reason = signal.reason;
@@ -22,10 +20,8 @@ function abortReason(signal: AbortSignal, fallback: string): unknown {
 }
 
 /**
- * Пауза с поддержкой отмены. Сохраняет reason отменённого сигнала:
- * таймаут остаётся kind timeout, а не превращается в kind abort.
- *
- * Отклоняется с reason сигнала, если он задан, иначе с AbortError.
+ * Cancellable pause. Preserves signal reason: timeout stays kind
+ * timeout, not kind abort.
  */
 export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) {
@@ -54,14 +50,9 @@ export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 /**
- * AbortSignal, срабатывающий через указанное время. Возвращает
- * функцию отмены таймера, если запрос завершился раньше.
- *
- * В Node таймер не удерживает event loop (unref), чтобы короткая
- * CLI-утилита не ждала полного истечения timeoutMs после завершения
- * запроса.
- *
- * Причина отмены: TimeoutError.
+ * AbortSignal with timeout. In Node the timer does not hold the
+ * event loop (unref), so the process does not wait for full
+ * timeoutMs after the request completes. Abort reason: TimeoutError.
  */
 export function setAbortTimeout(ms: number): { signal: AbortSignal; clear: () => void } {
   const controller = new AbortController();

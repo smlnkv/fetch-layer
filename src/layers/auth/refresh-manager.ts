@@ -9,60 +9,45 @@ import type { RefreshResult, SessionProvider } from './types';
 const DEFAULT_REFRESH_TIMEOUT_MS = 30_000;
 
 /**
- * Внутренний результат refresh. Отличается от публичного
- * RefreshResult наличием статуса cooldown: успешный refresh был
- * меньше circuitBreakerMs назад. Обрабатывается внутри withAuth,
- * наружу не выходит.
+ * Internal refresh result. Differs from public RefreshResult by
+ * cooldown status: a successful refresh happened less than
+ * circuitBreakerMs ago. Handled inside withAuth, never leaves the
+ * library.
  */
 export type RefreshManagerResult = RefreshResult | { status: 'cooldown' };
 
-/**
- * Колбэки состояния предохранителя. Источник - AuthOptions.
- */
+/** Breaker state callbacks. Source is AuthOptions. */
 export interface RefreshManagerCallbacks {
   onCircuitOpen?: () => void;
   onCircuitClose?: () => void;
 }
 
 /**
- * Менеджер обновления токена. Один на клиент.
+ * Token refresh manager. One per client.
  *
- * Решает три задачи:
- *
- * 1. Single-flight: параллельные 401 запускают один refresh.
- * 2. Предохранитель: после временного сбоя новые попытки
- *    блокируются на circuitBreakerMs.
- * 3. Cooldown: успешный refresh не повторяется в пределах
- *    circuitBreakerMs. Pipeline idempotency -> retry -> auth может
- *    снова получить 401 в рамках одной операции; без cooldown это
- *    запускает второй refresh.
- *
- * Таймаут refresh ограничен refreshTimeoutMs. Вызов завершается
- * по таймауту, даже если реализация SessionProvider не слушает
- * переданный signal.
+ * Three mechanisms: single-flight (one refresh for concurrent 401s),
+ * breaker (blocking after a failure) and cooldown (no second refresh
+ * right after a successful one).
  */
 export class RefreshManager {
   private readonly circuit: CircuitBreaker;
   private readonly singleFlight = new SingleFlight<RefreshManagerResult>();
   private readonly refreshTimeoutMs: number;
 
-  /**
-   * Время последнего успешного refresh. Используется для cooldown.
-   */
+  /** Last successful refresh time. Used for cooldown. */
   private lastSuccessfulRefreshAt = 0;
 
   /**
-   * Растёт при каждом reset(). doRefresh запоминает значение до
-   * await, после - сравнивает. Если reset() был во время refresh,
-   * результат не записывается в lastSuccessfulRefreshAt: сброс
-   * обнуляет cooldown, следующий 401 запускает refresh.
+   * Grows on every reset(). doRefresh remembers the value before
+   * await and compares after. If reset() ran during refresh, the
+   * result is not written to lastSuccessfulRefreshAt.
    */
   private resetCount = 0;
 
   /**
-   * Signals, переданные в provider.refresh. Нужны, чтобы отличить
-   * 401 внутри refresh от обычного 401: такой запрос инициирован
-   * самим refresh и не должен снова запускать refresh.
+   * Signals passed to provider.refresh. Needed to tell a 401 inside
+   * refresh from a regular 401: such request must not start refresh
+   * again.
    */
   private readonly refreshSignals = new WeakSet<AbortSignal>();
 
@@ -78,12 +63,12 @@ export class RefreshManager {
   }
 
   /**
-   * Сбрасывает предохранитель, cooldown и забывает текущий refresh.
-   * Вызывается через resetRefreshCircuit, когда приложение знает,
-   * что проблема устранена.
+   * Resets the breaker, cooldown and forgets the current refresh.
+   * Called via resetRefreshCircuit when the app knows the problem is
+   * gone.
    *
-   * Забыть нужно до закрытия предохранителя: иначе следующий 401
-   * присоединится к прежнему промису, и сброс не даст эффекта.
+   * Forgetting must happen before closing the breaker: otherwise the
+   * next 401 joins the previous promise and reset has no effect.
    */
   reset(): void {
     this.resetCount++;
@@ -93,18 +78,17 @@ export class RefreshManager {
   }
 
   /**
-   * true, если signal создан внутри текущего doRefresh. Запрос
-   * с таким signal инициирован провайдером, а не приложением.
+   * true if signal was created inside the current doRefresh: the
+   * request was initiated by the provider, not by the app.
    */
   isRefreshSignal(signal: AbortSignal | undefined): boolean {
     return signal !== undefined && this.refreshSignals.has(signal);
   }
 
   /**
-   * Обновляет сессию или присоединяется к текущему обновлению.
+   * Refreshes the session or joins the current refresh.
    *
-   * @param circuitBreakerMs - длительность предохранителя
-   *  и окна cooldown.
+   * @param circuitBreakerMs - breaker duration and cooldown window.
    */
   refresh(provider: SessionProvider, circuitBreakerMs: number): Promise<RefreshManagerResult> {
     if (this.circuit.isBlocking()) {
@@ -128,14 +112,12 @@ export class RefreshManager {
   }
 
   /**
-   * Вызывает provider.refresh с таймаутом и классифицирует результат.
+   * Calls provider.refresh with a timeout and classifies the result.
+   * TypeError around provider.refresh is a network error: the
+   * implementation usually calls fetch inside.
    *
-   * TypeError вокруг provider.refresh означает сетевую ошибку:
-   * реализация обычно делает fetch внутри. Тот же контекст, что
-   * и в транспорте вокруг fetchImpl.
-   *
-   * Возвращает нормализованный error в ветке temporarily-failed:
-   * withAuth не должен вызывать toApiError повторно.
+   * Returns a normalized error in temporarily-failed: withAuth must
+   * not call toApiError again.
    */
   private async doRefresh(
     provider: SessionProvider,
@@ -146,8 +128,9 @@ export class RefreshManager {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
 
-    // Таймаут отклоняет промис сам, независимо от того, слушает ли
-    // реализация signal. controller.abort - подсказка ей.
+    // The timeout rejects the promise on its own, regardless of
+    // whether the implementation listens to signal. controller.abort
+    // is a hint to it.
     const timeoutPromise = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
         const reason = new DOMException('Refresh timeout', 'TimeoutError');
@@ -166,15 +149,16 @@ export class RefreshManager {
       this.refreshSignals.add(controller.signal);
       const providerPromise = provider.refresh(controller.signal);
 
-      // После таймаута race уже разрешён, а провайдер может
-      // отклониться позже. Без catch это unhandledRejection.
+      // After the timeout the race is already settled, but the
+      // provider may reject later. Without catch this is an
+      // unhandledRejection.
       providerPromise.catch(() => {});
 
       result = await Promise.race([providerPromise, timeoutPromise]);
     } catch (e) {
       const err = classifyFetchError(e);
 
-      // Таймаут refresh - сбой, открываем предохранитель.
+      // Refresh timeout is a failure, open the breaker.
       if (err.kind === 'timeout') {
         this.circuit.open(circuitBreakerMs);
         return {
@@ -188,12 +172,12 @@ export class RefreshManager {
         };
       }
 
-      // Отмена - не сбой сети, предохранитель не открываем.
+      // Cancel is not a network failure, do not open the breaker.
       if (err.isCancelled) {
         return { status: 'temporarily-failed', error: err };
       }
 
-      // 401 или 403 от обновления - сессия мертва.
+      // 401 or 403 from refresh means the session is dead.
       if (err.status === 401 || err.status === 403) {
         return {
           status: 'definitely-failed',
@@ -201,11 +185,9 @@ export class RefreshManager {
         };
       }
 
-      // Сетевой сбой или 5xx от auth-сервера - открываем
-      // предохранитель. Остальные ошибки (unknown, parse) скорее
-      // всего баг в реализации refresh, а не сбой сервера. Ложное
-      // открытие замаскировало бы реальную причину под
-      // REFRESH_CIRCUIT_OPEN на circuitBreakerMs миллисекунд.
+      // Network or 5xx from the auth server - open the breaker.
+      // unknown and parse are more likely a bug in refresh: a false
+      // open would hide the cause under REFRESH_CIRCUIT_OPEN.
       if (err.kind === 'network' || err.isServerError) {
         this.circuit.open(circuitBreakerMs);
       }
@@ -224,9 +206,8 @@ export class RefreshManager {
     }
 
     if (result.status === 'success') {
-      // Если во время refresh был вызван reset(), не записываем
-      // lastSuccessfulRefreshAt: сброс означает, что cooldown
-      // не должен применяться к следующему 401.
+      // reset() during refresh: do not write lastSuccessfulRefreshAt,
+      // cooldown must not apply to the next 401.
       if (this.resetCount === resetCountAtStart) {
         this.lastSuccessfulRefreshAt = Date.now();
       }

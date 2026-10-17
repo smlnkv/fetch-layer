@@ -15,101 +15,91 @@ import type { Layer, LayerContext, LayerWrapResult } from '../../core/layer';
 import type { RequestFn, ResolvedRequestConfig } from '../../core/types';
 
 /**
- * Имя заголовка идемпотентности по умолчанию. Используется для
- * предупреждения о небезопасном повторе, когда withIdempotency
- * не подключён, а приложение задало ключ вручную. Если маркер
- * idempotency в конфиге есть, заголовок не проверяется.
+ * Default idempotency header name. Used by the unsafe retry warning
+ * when withIdempotency is not wired up but the app set the key
+ * manually. An idempotency marker in the config skips the header
+ * check.
  */
 const DEFAULT_IDEMPOTENCY_HEADER = 'Idempotency-Key';
 
 export interface RetryOptions {
   /**
-   * Максимальное количество попыток, включая первую. По умолчанию 3,
-   * минимум 1.
+   * Max attempts, including the first one. Defaults to 3, minimum 1.
    */
   maxAttempts?: number;
 
   /**
-   * Начальная задержка в миллисекундах. По умолчанию 300. Значения
-   * ниже MIN_RETRY_MS поднимаются до минимума.
+   * Initial delay in milliseconds. Defaults to 300. Values below
+   * MIN_RETRY_MS are raised to the minimum.
    */
   baseDelayMs?: number;
 
   /**
-   * Верхняя граница задержки. По умолчанию 10000. Ограничивает
-   * вычисленную задержку backoff и служит порогом для Retry-After:
-   * если сервер запросил больше, повтор не выполняется.
+   * Upper bound of the delay. Defaults to 10000. Caps the computed
+   * delay and acts as threshold for Retry-After: if the server asked
+   * for more, the retry is skipped.
    *
-   * Значение должно быть не меньше baseDelayMs после его
-   * ограничения снизу. Иначе withRetry выбрасывает ошибку при
-   * создании слоя: молча поднимать границу нельзя, приложение
-   * ожидает, что она соблюдается.
+   * Must be >= baseDelayMs after it was raised to MIN_RETRY_MS,
+   * otherwise withRetry throws.
    */
   maxDelayMs?: number;
 
   /**
-   * Разброс вокруг вычисленной задержки, по умолчанию 0.15 (+-15%).
-   * 0 отключает разброс, 1 даёт разброс +-100%. Не применяется
-   * к Retry-After. Значение должно быть в диапазоне [0, 1].
+   * Spread around the computed delay, defaults to 0.15 (+-15%).
+   * 0 disables the spread, 1 gives +-100%. Not applied to
+   * Retry-After. Value in [0, 1].
    */
   jitterRatio?: number;
 
   /**
-   * Предупреждать о повторе мутирующего запроса без заголовка
-   * идемпотентности. По умолчанию true.
+   * Warn about a mutating retry without idempotency header. Defaults
+   * to true.
    *
-   * Предупреждение не выводится, если withIdempotency применил
-   * ключ, приложение задало заголовок Idempotency-Key само или
-   * передало skipIdempotency: true. Выводится один раз на метод
-   * и корневой сегмент пути: для DELETE /sessions/123 корневой
-   * сегмент - sessions.
+   * No warning when withIdempotency applied a key, the app set
+   * Idempotency-Key itself, or passed skipIdempotency: true. Once per
+   * method and root path segment: for DELETE /sessions/123 the root
+   * segment is sessions.
    */
   warnOnUnsafeRetry?: boolean;
 
-  /**
-   * Повторять ли сетевые ошибки (kind network). По умолчанию true.
-   */
+  /** Retry network errors (kind network). Defaults to true. */
   retryOnNetwork?: boolean;
 
   /**
-   * Повторять ли таймауты (kind timeout). По умолчанию true.
-   * Таймаут означает, что ответа от сервера не было; повтор уместен,
-   * если операция идемпотентна. Для небезопасных методов
-   * (POST) повтор без Idempotency-Key может создать дубликат.
+   * Retry timeouts (kind timeout). Defaults to true. For unsafe
+   * methods a retry without Idempotency-Key may create a duplicate.
    */
   retryOnTimeout?: boolean;
 
   /**
-   * Политика повтора. По умолчанию error.isRetryable с учётом
-   * retryOnNetwork и retryOnTimeout. Ошибки авторизации и отмены
-   * не повторяются, даже если функция вернёт true.
+   * Retry policy. Defaults to isRetryable, adjusted by retryOnNetwork
+   * and retryOnTimeout. Cancel and auth errors are not retried even
+   * if the function returns true.
    *
-   * Падение колбэка не подменяет исходную ошибку: применяется
-   * дефолтная политика, сообщение об ошибке уходит в warn.
+   * On callback failure the default policy is used, the error goes
+   * to warn.
    *
-   * @param attempt - номер провалившейся попытки, считая с 1.
+   * @param attempt - failed attempt number, 1-based.
    */
   shouldRetry?: (error: ApiError, attempt: number) => boolean;
 
   /**
-   * Вычисляет задержку перед повтором. Не применяется, если сервер
-   * прислал Retry-After. Результат ограничивается диапазоном
-   * [MIN_RETRY_MS, maxDelayMs].
+   * Delay before retry. Not applied when the server sent Retry-After.
+   * Result is clamped to [MIN_RETRY_MS, maxDelayMs].
    *
-   * Падение колбэка не подменяет исходную ошибку: применяется
-   * дефолтная задержка, сообщение об ошибке уходит в warn.
+   * On callback failure the default delay is used, the error goes
+   * to warn.
    *
-   * @param attempt - номер провалившейся попытки, считая с 1.
+   * @param attempt - failed attempt number, 1-based.
    */
   computeDelay?: (attempt: number, error: ApiError) => number;
 
   /**
-   * Вызывается перед каждой попыткой повтора. Может вернуть новый
-   * конфиг, чтобы изменить заголовки (например, заменить
-   * Idempotency-Key при 409). Вернув конфиг со skipRetry: true,
-   * останавливает повторы: ошибка пробрасывается сразу.
+   * Before each retry. May return a new config (e.g. replace
+   * Idempotency-Key on 409) or stop retries by returning
+   * skipRetry: true - the error is rethrown at once.
    *
-   * @param attempt - номер попытки с 1. Первый повтор: attempt === 1.
+   * @param attempt - attempt number from 1. First retry: attempt === 1.
    */
   onBeforeRetry?: (
     config: ResolvedRequestConfig,
@@ -117,14 +107,14 @@ export interface RetryOptions {
     error: ApiError,
   ) => ResolvedRequestConfig | void;
 
-  /** Пауза между попытками. По умолчанию setTimeout с отменой. */
+  /** Pause between attempts. Defaults to setTimeout with abort. */
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
 }
 
 /**
- * Первый сегмент пути: для "/orders/123" это "orders". Служит
- * ключом дедупликации предупреждения: динамические id внутри
- * одного ресурса схлопываются, разные ресурсы дают разные ключи.
+ * First path segment: for "/orders/123" it is "orders". Dedup key
+ * for the warning: dynamic ids inside one resource collapse,
+ * different resources give different keys.
  */
 function rootSegment(path: string): string {
   const trimmed = path.replace(/^\/+/, '');
@@ -133,24 +123,23 @@ function rootSegment(path: string): string {
 }
 
 /**
- * Слой автоматических повторов.
+ * Automatic retry layer.
  *
- * Повторяет при временных сбоях: сетевые ошибки, таймауты, 5xx,
- * 408 и 429. Не повторяет отмену, ошибки авторизации и остальные
- * 4xx: сервер явно отверг операцию.
+ * Retries network errors, timeouts, 5xx, 408 and 429. Does not retry
+ * cancel, auth errors and other 4xx.
  *
- * Задержки по умолчанию экспоненциальные с разбросом +-15%
- * (300, 600, 1200 мс). Верхняя граница - maxDelayMs.
+ * Delays are exponential with +-15% spread (300, 600, 1200 ms), upper
+ * bound is maxDelayMs.
  *
- * Retry-After из ответа используется вместо экспоненциальной
- * задержки. Если значение больше maxDelayMs, повтор не выполняется:
- * сервер просит подождать дольше, чем приложение готово ждать.
+ * Retry-After from the response replaces the computed delay. If the
+ * value is above maxDelayMs, the retry is skipped: the server asks to
+ * wait longer than the app is ready to.
  *
- * Для потоковых тел (Web ReadableStream, Node.js stream.Readable)
- * повторы отключены: поток одноразовый, повторный fetch выбросит
- * TypeError, который транспорт классифицирует как сетевую ошибку.
+ * Retries are disabled for streaming bodies: a stream is single-use,
+ * a second fetch throws TypeError, which transport takes for a
+ * network error.
  *
- * @throws Error если параметры конфигурации некорректны.
+ * @throws Error on invalid options.
  */
 export function withRetry(options: RetryOptions = {}): Layer {
   const {
@@ -188,9 +177,9 @@ export function withRetry(options: RetryOptions = {}): Layer {
   const maxDelayMs = rawMaxDelayMs;
 
   /**
-   * По умолчанию повторяем всё, что isRetryable, но network и timeout
-   * фильтруются отдельными опциями. Это позволяет приложению
-   * отключить повтор таймаутов, сохранив повторы сети.
+   * Default retries everything isRetryable allows, but network and
+   * timeout are filtered by separate options: timeouts can be turned
+   * off while network retries stay on.
    */
   const defaultShouldRetry = (err: ApiError): boolean => {
     if (!err.isRetryable) return false;
@@ -199,10 +188,7 @@ export function withRetry(options: RetryOptions = {}): Layer {
     return true;
   };
 
-  /**
-   * Начинается с 1: первый повтор даёт базовую задержку, второй -
-   * удвоенную.
-   */
+  /** 1-based: first retry gets base delay, second - doubled. */
   const defaultCompute = (attempt: number): number => {
     const jitter = 1 - jitterRatio + Math.random() * jitterRatio * 2;
     return baseDelayMs * 2 ** (attempt - 1) * jitter;
@@ -216,8 +202,8 @@ export function withRetry(options: RetryOptions = {}): Layer {
     stage: 2,
 
     wrap(next: RequestFn, context: LayerContext): LayerWrapResult {
-      // Set живёт внутри wrap: каждый createClient получает свой
-      // экземпляр, даже если один Layer передан в несколько клиентов.
+      // Set inside wrap: each createClient gets its own instance, even
+      // if the same Layer is passed to several clients.
       const warnedUnsafeRetry = new Set<string>();
       const warn = context.warn;
 
@@ -236,9 +222,9 @@ export function withRetry(options: RetryOptions = {}): Layer {
           return next<T>(initialConfig);
         }
 
-        // Стрим одноразовый: fetch забирает его при первой отправке,
-        // повторная выбрасывает TypeError. Транспорт классифицирует
-        // его как network error, что маскирует настоящую причину.
+        // A stream is single-use: fetch takes it on the first send,
+        // a retry throws TypeError, transport takes it for a network
+        // error.
         if (isStreamingBody(initialConfig.body)) {
           if (!warnedStreamNoRetry) {
             warnedStreamNoRetry = true;
@@ -255,15 +241,14 @@ export function withRetry(options: RetryOptions = {}): Layer {
 
         const method = initialConfig.method ?? 'GET';
 
-        // Маркер ставит withIdempotency. Если его нет, проверяем
-        // заголовок Idempotency-Key: приложение могло задать ключ
-        // вручную без подключения слоя.
+        // Marker is set by withIdempotency. If missing, check the
+        // header: the app could set the key manually.
         const hasIdempotencyKey =
           initialConfig.idempotency !== undefined ||
           getHeader(initialConfig.headers, DEFAULT_IDEMPOTENCY_HEADER) !== undefined;
 
-        // Проверяем до первой попытки: предупреждение относится
-        // к конфигурации, а не к факту повтора.
+        // Before the first attempt: the warning is about config, not
+        // about an actual retry.
         if (
           warnOnUnsafeRetry &&
           isMutatingMethod(method) &&
@@ -310,8 +295,8 @@ export function withRetry(options: RetryOptions = {}): Layer {
 
             if (!retryDecision) throw err;
 
-            // Retry-After имеет приоритет: если сервер запросил
-            // больше maxDelayMs, повтор не выполняем.
+            // Retry-After takes priority: if the server asked for more
+            // than maxDelayMs, skip the retry.
             let delay: number;
             if (err.retryAfterMs !== undefined) {
               if (err.retryAfterMs > maxDelayMs) throw err;
@@ -333,9 +318,8 @@ export function withRetry(options: RetryOptions = {}): Layer {
               delay = Math.min(clampDelay(computed, MIN_RETRY_MS), maxDelayMs);
             }
 
-            // onBeforeRetry может заменить конфиг (например,
-            // Idempotency-Key при 409) или остановить повторы,
-            // вернув skipRetry: true.
+            // onBeforeRetry may replace the config or stop retries via
+            // skipRetry: true.
             config = safeCall(() => onBeforeRetry?.(config, failedAttempt, err)) ?? config;
             if (config.skipRetry) throw err;
 

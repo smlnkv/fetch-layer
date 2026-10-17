@@ -1,7 +1,7 @@
 /**
- * Регистр имён заголовков не имеет значения по спецификации: модуль
- * нормализует его при чтении и слиянии, сохраняя исходный вид имени
- * в результирующем объекте.
+ * Header name case does not matter per spec: the module normalizes
+ * it when reading and merging, keeping the original name in the
+ * result.
  */
 
 function isHeaders(value: unknown): value is Headers {
@@ -15,9 +15,8 @@ function isPairArray(value: unknown): value is ReadonlyArray<readonly [string, s
 }
 
 /**
- * Приводит Headers или массив пар к Record<string, string>. Для
- * Record возвращает исходный объект без копии. Нужна для вызовов
- * из JS, где RequestConfig.headers может прийти в формате Fetch API.
+ * Converts Headers or an array of pairs to Record<string, string>.
+ * Record is returned as is, no copy.
  */
 function normalizeHeaders(input: unknown): Record<string, string> {
   if (isHeaders(input)) {
@@ -42,9 +41,7 @@ function normalizeHeaders(input: unknown): Record<string, string> {
 }
 
 /**
- * Значение заголовка, регистр имени игнорируется. Унаследованные
- * свойства не читаются. Принимает Record, Headers или массив пар:
- * нормализация выполняется внутри, TS-потребитель передаёт Record.
+ * Header value. Inherited properties are not read.
  */
 export function getHeader(headers: unknown, name: string): string | undefined {
   if (!headers) return undefined;
@@ -58,8 +55,8 @@ export function getHeader(headers: unknown, name: string): string | undefined {
 }
 
 /**
- * Устанавливает заголовок, удаляя другие варианты того же имени
- * с иным регистром. Двух заголовков с одним смыслом быть не должно.
+ * Sets a header, removing variants with a different case. Two headers
+ * with the same meaning must not exist.
  */
 export function setHeader(headers: Record<string, string>, name: string, value: string): void {
   const lower = name.toLowerCase();
@@ -72,13 +69,9 @@ export function setHeader(headers: Record<string, string>, name: string, value: 
 }
 
 /**
- * Сливает несколько наборов заголовков в один. Более поздние
- * источники переопределяют более ранние, регистр нормализуется.
- * Если в первом объекте был content-type, а во втором Content-Type,
- * в результате останется только один - из второго источника.
- *
- * Принимает Record, Headers и массив пар: нормализация внутри,
- * TS-потребитель передаёт Record.
+ * Merges header sets. Later sources override earlier ones, case is
+ * normalized. If the first had content-type and the second
+ * Content-Type, only one remains - from the second source.
  */
 export function mergeHeaders(...sources: unknown[]): Record<string, string> {
   const result: Record<string, string> = {};

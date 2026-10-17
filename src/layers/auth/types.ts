@@ -1,35 +1,30 @@
 /**
- * Причина истечения сессии. Передаётся в колбэк onSessionExpired.
+ * Session expiry reason. Passed to onSessionExpired.
  *
- * - refresh-rejected: сервер отверг обновление токена (401);
- * - refresh-forbidden: сервер запретил обновление (403);
- * - token-rejected: после успешного обновления новый токен тоже
- *   был отвергнут сервером.
+ * - refresh-rejected: server rejected token refresh (401);
+ * - refresh-forbidden: server forbade refresh (403);
+ * - token-rejected: after a successful refresh the new token was
+ *   rejected too.
  */
 export type SessionExpiredReason = 'refresh-rejected' | 'refresh-forbidden' | 'token-rejected';
 
 /**
- * Результат попытки обновления сессии.
+ * Session refresh result.
  *
- * success. Токен обновлён. Если поле headers задано, клиент
- * использует его для повтора исходного запроса. Если нет, вызовет
- * getAuthHeaders ещё раз. Лучше возвращать headers: это устраняет
- * гонку, когда реализация ещё не успела обновить состояние,
- * а запрос уже пошёл на повтор.
+ * success. Token refreshed. If headers is set, the client uses it for
+ * the retry, otherwise calls getAuthHeaders. Prefer returning
+ * headers: this closes the race when the state is not updated yet
+ * but the request is already retrying.
  *
- * definitely-failed. Сессия мертва. Клиент вызовет onSessionExpired
- * и пробросит исходную ошибку 401. Пользователя нужно разлогинить.
+ * definitely-failed. Session is dead. The client calls
+ * onSessionExpired and rethrows the original 401.
  *
- * temporarily-failed. Сеть, таймаут, 5xx, предохранитель открыт.
- * Сессия, возможно, жива. Клиент пробросит ошибку, но разлогинивать
- * не будет: пользователь не должен терять сессию из-за "мигнувшего"
- * Wi-Fi.
+ * temporarily-failed. Session may still be alive. The client
+ * rethrows the error but does not call onSessionExpired or clear.
  *
- * Поле error в temporarily-failed - любое значение. Клиент
- * нормализует его сам: TypeError вокруг provider.refresh становится
- * network, AbortError и TimeoutError - соответствующими kind,
- * всё остальное - unknown. Конвертировать в ApiError на стороне
- * приложения не нужно.
+ * error is any value. The client normalizes it: TypeError becomes
+ * network, AbortError and TimeoutError - the matching kind,
+ * everything else - unknown.
  */
 export type RefreshResult =
   | { status: 'success'; headers?: Record<string, string> }
@@ -37,69 +32,36 @@ export type RefreshResult =
   | { status: 'temporarily-failed'; error: unknown };
 
 /**
- * Провайдер авторизации. Реализуется приложением: библиотека
- * не хранит токены, только запрашивает готовые заголовки.
+ * Auth provider. Implemented by the app: the library does not store
+ * tokens, it only asks for ready headers.
  *
- * Ответственность приложения.
- *
- * Таймаут. Библиотека ограничивает refresh через refreshTimeoutMs
- * (по умолчанию 30 секунд) и передаёт signal в refresh. Провайдер
- * должен передать signal в свой fetch. Если signal игнорируется,
- * таймаут на стороне библиотеки не сработает. Для собственного
- * ограничения можно использовать AbortSignal.timeout внутри refresh.
- *
- * Синхронизация между вкладками. Одновременное истечение токена
- * в нескольких вкладках приводит к параллельным refresh. Рекомендуется
- * Web Locks API (navigator.locks.request) или BroadcastChannel.
- *
- * Три состояния refresh. Приложение само решает, когда сессия
- * мертва (сервер ответил 401 на refresh), а когда временный сбой
- * (сеть, 5xx). От этого зависит, разлогинит ли клиент пользователя.
+ * refresh must not use the client with withAuth: a 401 from the
+ * refresh endpoint would go back into withAuth. A separate client
+ * without layers is described in RECIPES.
  */
 export interface SessionProvider {
   /**
-   * Готовые заголовки авторизации для запроса.
+   * Auth headers: one or several (Authorization, X-CSRF-Token,
+   * X-API-Key). May be async.
    *
-   * Может вернуть один или несколько: Authorization, X-CSRF-Token,
-   * X-API-Key. Может быть асинхронным, если токен читается
-   * из async-хранилища.
-   *
-   * @throws Может выбросить исключение. Клиент обернёт его
-   *   в ApiError с кодом AUTH_PROVIDER_ERROR и не отправит запрос.
+   * @throws On error the client wraps the exception in ApiError with
+   *   code AUTH_PROVIDER_ERROR and does not send the request.
    */
   getAuthHeaders(): Record<string, string> | Promise<Record<string, string>>;
 
   /**
-   * Обновляет сессию. Вызывается при 401.
+   * Refreshes the session. Called on 401. Concurrent 401s produce one
+   * refresh call, the rest wait for its result.
    *
-   * При параллельных 401 клиент вызовет refresh один раз: остальные
-   * запросы ждут результата того же вызова (single-flight).
-   *
-   * @param signal - сигнал отмены. Срабатывает по таймауту
-   *   refreshTimeoutMs. Передайте его в свой fetch:
-   *   fetch(url, { signal }).
-   *
-   *   Параметр опционален: провайдер без него совместим
-   *   с интерфейсом, но не будет отменяться по таймауту.
-   *
-   * Если fetch внутри упал, достаточно вернуть ошибку как есть:
-   *
-   * catch (e) {
-   *   return { status: 'temporarily-failed', error: e };
-   * }
-   *
-   * Конвертировать в ApiError не нужно: клиент нормализует сам.
-   * См. описание RefreshResult.
+   * @param signal - abort on refreshTimeoutMs. Pass it to your fetch:
+   *   fetch(url, { signal }). Optional: a provider without it still
+   *   matches the interface, but will not be aborted on timeout.
    */
   refresh(signal?: AbortSignal): Promise<RefreshResult>;
 
   /**
-   * Сбрасывает состояние сессии. Вызывается, когда refresh вернул
-   * definitely-failed.
-   *
-   * Должен очистить хранилище токенов. Исключения игнорируются:
-   * падение clear не мешает обработке 401. Функция должна быть
-   * идемпотентной.
+   * Resets session state. Called on definitely-failed. Exceptions
+   * are ignored. Must be idempotent.
    */
   clear?(): void;
 }

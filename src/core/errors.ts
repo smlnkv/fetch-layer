@@ -1,32 +1,26 @@
 /**
- * Все HTTP-ошибки приводятся к одному классу ApiError, чтобы
- * приложение обрабатывало их в одной точке, а не разбирало
- * Response в каждом catch.
+ * All library errors are normalized to ApiError: the app handles
+ * them in one place instead of parsing Response in every catch.
  */
 
 /**
- * Природа ошибки. Влияет на стратегию обработки.
+ * Error category. Affects handling strategy.
  *
- * - network: нет соединения (сеть, DNS, CORS);
- * - timeout: запрос не успел завершиться, включая refresh токена;
- * - http: статус вне диапазона 2xx;
- * - parse: тело ответа не удалось разобрать;
- * - abort: запрос отменён через AbortSignal по инициативе приложения;
- * - serialize: не удалось сериализовать тело запроса, отпечаток
- *   тела для идемпотентности или вернуть валидный ключ
- *   (IDEMPOTENCY_KEY_INVALID);
- * - storage: не удалось сохранить ключ идемпотентности в хранилище;
- * - unknown: ошибка, которую не удалось классифицировать (включая
- *   AUTH_PROVIDER_ERROR, REFRESH_CIRCUIT_OPEN и
- *   INVALID_REQUEST_CONFIG).
+ * - network: no connection (network, DNS, CORS);
+ * - timeout: request did not finish in time, including token refresh;
+ * - http: status outside 2xx;
+ * - parse: response body could not be parsed;
+ * - abort: cancelled via AbortSignal;
+ * - serialize: body or fingerprint could not be serialized,
+ *   or idempotency key is invalid (IDEMPOTENCY_KEY_INVALID);
+ * - storage: idempotency key was not saved;
+ * - unknown: everything else, including AUTH_PROVIDER_ERROR,
+ *   REFRESH_CIRCUIT_OPEN and INVALID_REQUEST_CONFIG.
  */
 export type ApiErrorKind =
   'network' | 'timeout' | 'http' | 'parse' | 'abort' | 'serialize' | 'storage' | 'unknown';
 
-/**
- * Коды, которые библиотека относит к auth. Используются в геттерах
- * isAuthError и isRetryable.
- */
+/** Codes that isAuthError and isRetryable treat as auth. */
 const AUTH_ERROR_CODES = new Set([
   'AUTH_PROVIDER_ERROR',
   'REFRESH_TIMEOUT',
@@ -34,77 +28,57 @@ const AUTH_ERROR_CODES = new Set([
 ]);
 
 /**
- * Унифицированная ошибка библиотеки.
+ * Single error class for the library.
  *
- * Коды, которые устанавливает клиент:
+ * Library codes:
  *
  * - ABORTED, TIMEOUT, NETWORK_ERROR, PARSE_ERROR,
- *   BODY_SERIALIZATION_ERROR - транспорт;
- * - AUTH_PROVIDER_ERROR, REFRESH_TIMEOUT, REFRESH_CIRCUIT_OPEN -
- *   авторизация;
- * - IDEMPOTENCY_STORAGE_ERROR, IDEMPOTENCY_KEY_INVALID -
- *   идемпотентность;
- * - INVALID_REQUEST_CONFIG - клиент: конфиг запроса не прошёл
- *   валидацию (пустой path, timeoutMs меньше 100).
+ *   BODY_SERIALIZATION_ERROR - transport;
+ * - AUTH_PROVIDER_ERROR, REFRESH_TIMEOUT, REFRESH_CIRCUIT_OPEN - auth;
+ * - IDEMPOTENCY_STORAGE_ERROR, IDEMPOTENCY_KEY_INVALID - idempotency;
+ * - INVALID_REQUEST_CONFIG - request config failed validation
+ *   (empty path, timeoutMs < 100).
  *
- * Любые другие коды приходят от сервера в теле ответа.
+ * Other codes come from server response body.
  */
 export class ApiError extends Error {
   readonly kind: ApiErrorKind;
 
-  /**
-   * HTTP-статус ответа. 0, если ответа не было (сеть, таймаут,
-   * отмена).
-   */
+  /** HTTP status. 0 if no response (network, timeout, abort). */
   readonly status: number;
 
-  /** Код ошибки: от сервера или из списка выше. */
+  /** Code: server-side or from the list above. */
   readonly code: string;
 
   /**
-   * Ошибки отдельных полей формы. Ключ - имя поля, значение -
-   * текст ошибки. Значения гарантированно строковые: парсеры
-   * отбрасывают массивы и вложенные объекты, полный оригинал
-   * остаётся в rawBody.
+   * Form field errors. Key is field name, value is error text.
+   * Non-string values are dropped, full original stays in rawBody.
    */
   readonly fields?: Record<string, string>;
 
-  /**
-   * Значение заголовка X-Request-Id, если сервер его вернул.
-   * По нему можно найти запрос в логах сервера.
-   */
+  /** X-Request-Id, if server returned one. */
   readonly requestId?: string;
 
-  /**
-   * Значение заголовка Retry-After в миллисекундах, если он был.
-   */
+  /** Retry-After in milliseconds, if present. */
   readonly retryAfterMs?: number;
 
-  /**
-   * Оригинальное тело ответа как есть. Полезно, когда формат
-   * ошибки отличается от того, что умеет разбирать клиент
-   * по умолчанию.
-   */
+  /** Response body as is. Useful for non-standard formats. */
   readonly rawBody?: unknown;
 
-  /**
-   * Структурированные детали, извлечённые парсером. Парсер сам
-   * решает, что сюда положить. Для плоского формата undefined.
-   */
+  /** Details from error parser. undefined for flat shape. */
   readonly details?: unknown;
 
   /**
-   * true, если состояние операции на сервере неизвестно.
+   * true if server-side operation state is unknown.
    *
-   * - network, timeout: запрос мог не дойти или ответ мог потеряться.
-   * - 5xx: сервер ответил с ошибкой, но мог частично применить
-   *   операцию до сбоя.
-   * - parse на 2xx или 5xx: ответ получен, но его содержимое
-   *   неизвестно, состояние операции тоже.
-   * - 408/429: false - сервер ответил и явно не принял операцию.
-   * - parse на 4xx: false - сервер отверг операцию явно.
+   * - network, timeout: request may not have arrived or response
+   *   may be lost;
+   * - 5xx: server may have partially applied operation before failing;
+   * - parse on 2xx or 5xx: response body is unknown;
+   * - 408/429: false, server explicitly did not accept operation;
+   * - parse on 4xx: false, server explicitly rejected operation.
    *
-   * Для решений о безопасном повторе используйте isRetryable.
+   * For safe retry decisions use isRetryable.
    */
   readonly isUncertain: boolean;
 
@@ -134,47 +108,29 @@ export class ApiError extends Error {
     this.isUncertain = params.isUncertain ?? false;
   }
 
-  /**
-   * true для kind network и kind timeout. Ответа от сервера не было.
-   * Ошибка REFRESH_TIMEOUT тоже даёт true: refresh не дождался
-   * ответа.
-   */
+  /** true for kind network and timeout. No response from server. */
   get isNetwork(): boolean {
     return this.kind === 'network' || this.kind === 'timeout';
   }
 
-  /**
-   * true для kind abort. Запрос отменён через AbortSignal
-   * по инициативе приложения.
-   */
+  /** true for kind abort: cancelled by the app via AbortSignal. */
   get isCancelled(): boolean {
     return this.kind === 'abort';
   }
 
   /**
-   * Ошибка связана с авторизацией.
-   *
-   * true для:
-   * - ответов 401 и 403 (status);
-   * - кодов AUTH_PROVIDER_ERROR, REFRESH_TIMEOUT,
-   *   REFRESH_CIRCUIT_OPEN.
+   * Auth-related: status 401 or 403, or code AUTH_PROVIDER_ERROR,
+   * REFRESH_TIMEOUT or REFRESH_CIRCUIT_OPEN.
    */
   get isAuthError(): boolean {
     return AUTH_ERROR_CODES.has(this.code) || this.status === 401 || this.status === 403;
   }
 
   /**
-   * true для:
-   * - сетевых ошибок (kind network);
-   * - таймаутов (kind timeout);
-   * - 408 и 429;
-   * - 5xx (500-599).
+   * true for network, timeout, 408, 429 and 5xx.
    *
-   * false для:
-   * - отмены (kind abort);
-   * - ошибок авторизации: 401, 403 и кодов AUTH_PROVIDER_ERROR,
-   *   REFRESH_TIMEOUT, REFRESH_CIRCUIT_OPEN;
-   * - остальных 4xx.
+   * false for abort, auth errors (401, 403, AUTH_PROVIDER_ERROR,
+   * REFRESH_TIMEOUT, REFRESH_CIRCUIT_OPEN) and other 4xx.
    */
   get isRetryable(): boolean {
     if (this.kind === 'abort') return false;
@@ -186,46 +142,34 @@ export class ApiError extends Error {
   }
 
   /**
-   * 4xx. Эквивалент status >= 400 && status < 500.
-   *
-   * Пересекается с isAuthError: ответы 401 и 403 попадают в оба
-   * геттера. Если нужно отделить auth от остальных клиентских
-   * ошибок, проверяйте isAuthError первым.
+   * 4xx. Overlaps with isAuthError: 401 and 403 match both. To
+   * separate auth, check isAuthError first.
    */
   get isClientError(): boolean {
     return this.status >= 400 && this.status < 500;
   }
 
-  /**
-   * 5xx. Эквивалент status >= 500 && status < 600.
-   * Повтор через некоторое время может помочь.
-   */
+  /** 5xx. Retry after some time may help. */
   get isServerError(): boolean {
     return this.status >= 500 && this.status < 600;
   }
 
-  /**
-   * Конфликт версии ресурса: сервер ответил 409.
-   * Эквивалент status === 409.
-   */
+  /** status === 409. */
   get isConflict(): boolean {
     return this.status === 409;
   }
 }
 
 /**
- * Приводит любое исключение к ApiError. Если на вход уже пришёл
- * ApiError, возвращает его же (функция безопасна для повторного
- * вызова).
+ * Normalizes any exception to ApiError. Returns the same object if
+ * input is already an ApiError.
  *
- * Распознаёт AbortError, TimeoutError и SyntaxError по name, а не
- * через instanceof: ошибка из чужого realm (iframe, worker) имеет
- * другой конструктор, и проверка через instanceof вернула бы false.
+ * AbortError, TimeoutError and SyntaxError are detected by name,
+ * not via instanceof: an error from another realm (iframe, worker)
+ * has a different constructor.
  *
- * TypeError здесь не классифицируется как сетевая ошибка - его
- * источник неизвестен. Это делает classifyFetchError в контексте
- * вокруг fetch-подобного вызова. Всё остальное становится
- * ApiError с kind unknown.
+ * TypeError becomes unknown here: source is unknown. classifyFetchError
+ * classifies it as a network error.
  */
 export function toApiError(error: unknown): ApiError {
   if (error instanceof ApiError) return error;
@@ -273,12 +217,9 @@ export function toApiError(error: unknown): ApiError {
 }
 
 /**
- * Отличается от toApiError одной веткой: TypeError здесь означает
- * сетевую ошибку. Это верно в контексте вокруг fetch(url, init)
- * или provider.refresh, который обычно вызывает fetch внутри.
- *
- * В остальных местах TypeError может прийти от любой операции,
- * и там его классифицирует toApiError как unknown.
+ * Like toApiError, but TypeError is classified as a network error.
+ * Use only around fetch or provider.refresh: elsewhere the source
+ * of a TypeError is unknown.
  *
  * @internal
  */
@@ -296,9 +237,9 @@ export function classifyFetchError(error: unknown): ApiError {
 }
 
 /**
- * Исключение с указанным именем. Проверка по name, а не через
- * instanceof DOMException: в разных средах глобальный DOMException
- * может отсутствовать или быть другим классом.
+ * Exception with given name. Name check instead of instanceof
+ * DOMException: in another environment global DOMException may be
+ * absent or a different class.
  *
  * @internal
  */

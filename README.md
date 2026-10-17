@@ -7,7 +7,7 @@ An HTTP client built from layers. Each layer handles a single concern: auth, ret
 Three built-in layers:
 
 - `withAuth` - token refresh on 401, one refresh for all concurrent requests
-- `withRetry` - retries 5xx and network errors, honours `Retry-After`
+- `withRetry` - retries 5xx and network errors, honors `Retry-After`
 - `withIdempotency` - one `Idempotency-Key` per operation, including retries
 
 Errors from layers and transport come back as `ApiError`. Zero dependencies, tree-shaking.
@@ -43,7 +43,7 @@ Five requests go out at once, all get 401. Without coordination each request sta
 
 Network errors and 5xx: server may be down, connection may drop. A retry often succeeds on the second or third attempt.
 
-A retry creates duplicates when the operation is not idempotent. POST /orders on retry creates two orders: the first one may have reached the server, the response got lost, the retry created another.
+A retry creates duplicates when the operation is not idempotent. POST /orders on retry creates two orders: the first one may have reached the server, the response was lost, the retry created another.
 
 The fix is `Idempotency-Key`. The server matches it against previous requests and returns the result of the first one. The catch: the key must stay the same across the whole logical operation, including all retries and any refresh in between.
 
@@ -55,7 +55,7 @@ Every backend has its own error format. One returns `{ code, message }`, another
 
 The library splits error fields into two layers. The structural layer is the same for every backend: `kind`, `status`, `isRetryable`, `isCancelled`, `isUncertain`, `requestId` (from the `X-Request-Id` header), `retryAfterMs`. The content layer comes from the response body: `code`, `message`, `fields`, `details`. By default the client understands the flat shape `{ code, message, fields }` and plain text. For other formats (Fastify, RFC 7807, DRF, Laravel, `{ error: { code } }`) the app passes its own parsing function via `parseErrorBody`.
 
-The full response body is always available in `err.rawBody`, even when the format isn't recognised.
+The full response body is always available in `err.rawBody`, even when the format isn't recognized.
 
 ### Token refresh temporarily unavailable
 
@@ -79,9 +79,9 @@ Token refresh may fail: network is down, refresh endpoint returns 5xx. Without p
 
   ```ts
   const { meta } = await client.requestWithMeta({
-    path: "/api/jobs",
-    method: "POST",
-    body: { action: "start" },
+    path: '/api/jobs',
+    method: 'POST',
+    body: { action: 'start' },
   });
   await new Promise((resolve) => setTimeout(resolve, meta.retryAfterMs ?? 1000));
   ```
@@ -97,16 +97,16 @@ npm install fetch-layer
 ```
 
 ```ts
-import { createClient } from "fetch-layer";
+import { createClient } from 'fetch-layer';
 
-const client = createClient({ baseUrl: "/api" });
+const client = createClient({ baseUrl: '/api' });
 
-const products = await client.get<Product[]>("/products");
+const products = await client.get<Product[]>('/products');
 
-const review = await client.post("/reviews", {
+const review = await client.post('/reviews', {
   productId: products[0].id,
   rating: 5,
-  comment: "Great product"
+  comment: 'Great product',
 });
 ```
 
@@ -117,21 +117,21 @@ Both methods return the parsed response body. `post` sends an object as JSON. An
 The `layers` option takes an array of layers, ordered from outermost to innermost:
 
 ```ts
-import { createClient } from "fetch-layer";
+import { createClient } from 'fetch-layer';
 import {
   withAuth,
   withRetry,
   withIdempotency,
-  sessionStorageSource
-} from "fetch-layer/layers";
+  sessionStorageSource,
+} from 'fetch-layer/layers';
 
 const client = createClient({
-  baseUrl: "/api",
+  baseUrl: '/api',
   layers: [
     withIdempotency(sessionStorageSource()),
     withRetry({ maxAttempts: 3 }),
-    withAuth({ provider: sessionProvider })
-  ]
+    withAuth({ provider: sessionProvider }),
+  ],
 });
 ```
 
@@ -143,7 +143,7 @@ What the layers do, in this order:
 
 The order is not arbitrary - the library validates it at client creation. Swap `withIdempotency` and `withRetry` and the key gets regenerated on every retry - that breaks deduplication. `createClient` throws with the name of the layer that breaks the rule.
 
-If you don't need layers, `createClient({ baseUrl: "/api" })` gives you a plain HTTP client without auth, retries or idempotency.
+If you don't need layers, `createClient({ baseUrl: '/api' })` gives you a plain HTTP client without auth, retries or idempotency.
 
 ## Requirements
 
@@ -153,7 +153,7 @@ Needs a global `fetch`. If it's missing, `createClient` throws.
 
 ESM only. CommonJS is not supported.
 
-`crypto.randomUUID` is only needed when `withIdempotency` is in use with the built-in key generator. Checked on the first mutating request.
+`crypto.randomUUID` is only needed when `withIdempotency` is in use with the built-in key generator. It is checked on the first mutating request.
 
 ## Modules
 
@@ -173,16 +173,16 @@ The library is split into modules. Bundle size depends on what you import.
 `fetch-layer/layers` re-exports all three layers. If you only use one, import it directly - the bundler won't pull the others in.
 
 ```ts
-import { withRetry } from "fetch-layer/retry";
-import { withAuth } from "fetch-layer/auth";
-import { withIdempotency, sessionStorageSource } from "fetch-layer/idempotency";
+import { withRetry } from 'fetch-layer/retry';
+import { withAuth } from 'fetch-layer/auth';
+import { withIdempotency, sessionStorageSource } from 'fetch-layer/idempotency';
 ```
 
-`fetch-layer/layers` stays convenient for the common case: one import instead of three.
+`fetch-layer/layers` remains convenient for the common case: one import instead of three.
 
 ## How layers work
 
-Every layer is a wrapper around a request function. The `wrap` method takes `next` and returns its own version. The library follows the Decorator pattern (GoF): it adds behaviour while keeping the interface. The first layer in the array sees the request first, the last sees it last. Built-in layers run in order: idempotency, retries, auth. The transport receives the request last.
+Every layer is a wrapper around a request function. The `wrap` method takes `next` and returns its own version. The library follows the Decorator pattern (GoF): it adds behavior while keeping the interface. The first layer in the array sees the request first, the last sees it last. Built-in layers run in order: idempotency, retries, auth. The transport receives the request last.
 
 Each layer has a priority (`stage`). Higher number - earlier in the chain. Built-in priorities: `withIdempotency: 3`, `withRetry: 2`, `withAuth: 1`. To insert a custom layer between built-ins, use fractional values: `2.5` goes between idempotency and retries, `1.5` between retries and auth.
 
@@ -207,20 +207,20 @@ Hooks and interceptors can only change data on the way in and out. They don't de
 fetch-layer plugs into `queryFn` and `mutationFn`.
 
 ```tsx
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
 const client = createClient({
-  baseUrl: "/api",
+  baseUrl: '/api',
   layers: [
     withIdempotency(sessionStorageSource()),
-    withAuth({ provider: sessionProvider })
-  ]
+    withAuth({ provider: sessionProvider }),
+  ],
 });
 
 function useUser(id: string) {
   return useQuery({
-    queryKey: ["user", id],
-    queryFn: ({ signal }) => client.get<User>(`/users/${id}`, { signal })
+    queryKey: ['user', id],
+    queryFn: ({ signal }) => client.get<User>(`/users/${id}`, { signal }),
   });
 }
 
@@ -228,10 +228,10 @@ function useCreateOrder() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (order: Order) => client.post<Order>("/orders", order),
+    mutationFn: (order: Order) => client.post<Order>('/orders', order),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["orders"] });
-    }
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+    },
   });
 }
 ```
@@ -243,18 +243,18 @@ The main conflict is retry. TanStack Query has its own retry for `useQuery`, fet
 ```ts
 // Retry in fetch-layer, TanStack Query without retry.
 const client = createClient({
-  baseUrl: "/api",
-  layers: [withRetry({ maxAttempts: 3 })]
+  baseUrl: '/api',
+  layers: [withRetry({ maxAttempts: 3 })],
 });
 
 useQuery({
-  queryKey: ["user", id],
+  queryKey: ['user', id],
   queryFn: () => client.get<User>(`/users/${id}`),
-  retry: false
+  retry: false,
 });
 ```
 
-Everything else works without adapters: `ApiError` propagates to `error`, `signal` is accepted as-is, Devtools shows `queryFn` calls unchanged.
+Everything else works without adapters: `ApiError` propagates to `error`, `signal` is accepted as-is, DevTools shows `queryFn` calls unchanged.
 
 ## License
 

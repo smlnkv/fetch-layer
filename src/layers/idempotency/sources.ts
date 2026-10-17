@@ -5,19 +5,16 @@ import { createSessionSource } from './session';
 import type { IdempotencySource } from './types';
 
 /**
- * Источник ключей на базе sessionStorage браузера. Хранилище
- * изолировано между вкладками: два заказа из двух вкладок - две
- * разные операции с разными ключами. Для дедупликации между
- * вкладками используйте localStorageSource.
+ * Key source on top of sessionStorage. Storage is isolated between
+ * tabs: two orders from two tabs get different keys. For
+ * deduplication across tabs use localStorageSource.
  *
- * @throws Error если sessionStorage недоступен: SSR, Web Worker,
- *   Cloudflare Workers, отключённые cookies. Ошибка выбрасывается
- *   сразу при вызове фабрики, а не при первом запросе: так её
- *   проще связать с местом в коде.
+ * Outside a browser use memoryStorageSource or your own source on
+ * top of Redis, KV, IndexedDB.
  *
- * Для SSR, Web Worker, Cloudflare Workers используйте
- * memoryStorageSource или свой источник поверх Redis, KV,
- * IndexedDB.
+ * @throws Error if sessionStorage is not available: SSR, Workers,
+ *   disabled cookies. The error is thrown when the factory is
+ *   called, not on the first request.
  */
 export function sessionStorageSource(): IdempotencySource {
   return createSessionSource({
@@ -26,24 +23,16 @@ export function sessionStorageSource(): IdempotencySource {
 }
 
 /**
- * Источник ключей на базе localStorage браузера. Хранилище общее
- * для всех вкладок: одна и та же операция с одним телом из разных
- * вкладок получит один ключ и на сервере будет распознана
- * как дубликат.
+ * Key source on top of localStorage. Storage is shared between all
+ * tabs: one operation with one body from different tabs gets one key
+ * and is recognized as a duplicate on the server.
  *
- * @throws Error если localStorage недоступен: SSR, Web Worker,
- *   Cloudflare Workers, отключённые cookies. Ошибка выбрасывается
- *   сразу при вызове фабрики, а не при первом запросе.
+ * Outside a browser use memoryStorageSource or your own source on
+ * top of Redis, KV, IndexedDB.
  *
- * В приватном режиме Safari localStorage может быть недоступен
- * или вести себя непредсказуемо. fromWebStorage обрабатывает
- * ошибки чтения и очистки, но setItem в таком режиме может
- * выбросить QuotaExceededError. Если это критично, используйте
- * sessionStorageSource.
- *
- * Для SSR, Web Worker, Cloudflare Workers используйте
- * memoryStorageSource или свой источник поверх Redis, KV,
- * IndexedDB.
+ * @throws Error if localStorage is not available: SSR, Workers,
+ *   disabled cookies. The error is thrown when the factory is
+ *   called, not on the first request.
  */
 export function localStorageSource(): IdempotencySource {
   return createSessionSource({
@@ -52,9 +41,8 @@ export function localStorageSource(): IdempotencySource {
 }
 
 /**
- * Источник ключей на базе хранилища в памяти. Данные живут, пока
- * живёт процесс: при перезагрузке страницы теряются. Для тестов,
- * SSR, Web Worker, Cloudflare Workers и одноразовых операций.
+ * In-memory key source. Lives as long as the process; data is lost
+ * on page reload. For tests, SSR, Workers and one-off operations.
  */
 export function memoryStorageSource(): IdempotencySource {
   return createSessionSource({
@@ -62,10 +50,6 @@ export function memoryStorageSource(): IdempotencySource {
   });
 }
 
-/**
- * Глобальный sessionStorage или понятная ошибка вместо невнятного
- * TypeError при первом обращении к хранилищу.
- */
 function getSessionStorage(): Storage {
   if (typeof sessionStorage === 'undefined') {
     throw new Error(

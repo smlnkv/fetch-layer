@@ -8,27 +8,23 @@ import type { RequestFn, ResolvedRequestConfig } from '../../core/types';
 
 export interface IdempotencyOptions {
   /**
-   * Имя заголовка. По умолчанию Idempotency-Key. Некоторые серверы
-   * используют другое имя, например X-Idempotency-Key.
+   * Header name. Defaults to Idempotency-Key. Some servers use
+   * X-Idempotency-Key.
    */
   headerName?: string;
 }
 
 /**
- * Слой идемпотентности.
+ * For mutating methods adds the idempotency header with the value
+ * from the source. If the app set the header itself, the layer does
+ * not interfere. After completion reports the outcome to the source.
  *
- * Для изменяющих методов (POST, PUT, PATCH, DELETE) добавляет
- * заголовок идемпотентности со значением от источника. Если
- * приложение установило заголовок само, слой не вмешивается.
- * После завершения операции сообщает источнику исход.
+ * Sits outside the retry layer: the key is generated once for the
+ * whole operation, including retries, resolve is called once.
  *
- * Стоит снаружи retry-слоя: ключ генерируется один раз на всю
- * операцию, включая повторы, и resolve вызывается один раз.
- *
- * Помечает конфиг маркером idempotency, чтобы withRetry знал,
- * что ключ применён, и не выдавал ложное предупреждение о
- * небезопасном повторе. Маркер ставится и при сгенерированном
- * ключе, и при заданном вручную.
+ * Marks the config with an idempotency marker so withRetry does not
+ * emit a false unsafe retry warning. The marker is set both for a
+ * generated key and for a manual one.
  */
 export function withIdempotency(
   source: IdempotencySource,
@@ -50,7 +46,7 @@ export function withIdempotency(
           return next<T>(config);
         }
 
-        // Пустая строка и whitespace-only считаются "не установлено".
+        // Empty string and whitespace-only count as "not set".
         const existingKey = getHeader(config.headers, headerName);
         if (existingKey !== undefined && existingKey.trim() !== '') {
           return next<T>({
@@ -67,8 +63,8 @@ export function withIdempotency(
           scope: config.idempotencyScope,
         };
 
-        // Ошибка хранилища: без сохранённого ключа запрос отправлять
-        // нельзя, иначе повтор создаст дубликат.
+        // Storage error: without a saved key the request must not be
+        // sent, otherwise a retry creates a duplicate.
         let key: string;
         try {
           key = source.nextKey(context);
@@ -76,8 +72,8 @@ export function withIdempotency(
           throw toApiError(e);
         }
 
-        // mergeHeaders нормализует Headers и массив пар к объекту.
-        // Spread для Headers дал бы {}.
+        // mergeHeaders normalizes Headers and array of pairs to an
+        // object. Spread on Headers would give {}.
         const enrichedHeaders = mergeHeaders(config.headers);
         setHeader(enrichedHeaders, headerName, key);
 
@@ -104,8 +100,9 @@ export function withIdempotency(
 }
 
 /**
- * 4xx кроме 408 и 429: сервер явно отверг операцию, повтор
- * не поможет. Всё остальное: состояние операции неизвестно.
+ * 4xx except 408 and 429: the server explicitly rejected the
+ * operation, a retry will not help. Anything else - operation state
+ * is unknown.
  */
 function classifyOutcome(error: ApiError): IdempotencyOutcome {
   if (error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) {
@@ -114,10 +111,7 @@ function classifyOutcome(error: ApiError): IdempotencyOutcome {
   return 'indefinite-failure';
 }
 
-/**
- * Падение resolve не подменяет результат операции: успешный запрос
- * важнее очистки хранилища.
- */
+/** A resolve failure does not replace the operation result. */
 function safeResolve(
   source: IdempotencySource,
   context: IdempotencyContext,
@@ -127,6 +121,6 @@ function safeResolve(
   try {
     source.resolve(context, outcome);
   } catch {
-    // Ошибка очистки не влияет на результат запроса.
+    // A resolve failure does not replace the operation result.
   }
 }

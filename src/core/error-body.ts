@@ -1,8 +1,4 @@
-/**
- * Контентные поля ошибки, извлекаемые из тела ответа. Структурные
- * поля (kind, status, requestId, retryAfterMs) берёт транспорт,
- * здесь их нет.
- */
+/** Fields extracted by error parser. */
 type ErrorBodyContent = {
   code?: string;
   message?: string;
@@ -11,21 +7,16 @@ type ErrorBodyContent = {
 };
 
 /**
- * Парсер тела ошибки. Приложение передаёт функцию в
- * ClientOptions.parseErrorBody, если сервер отдаёт ошибки
- * в формате, отличном от плоского.
- *
- * Все поля опциональны: что не извлечено - остаётся undefined,
- * полное тело доступно в ApiError.rawBody.
- *
- * @public
+ * Error body parser. Passed to ClientOptions.parseErrorBody when
+ * server returns errors in a format other than flat. What is not
+ * extracted stays undefined, full body is in ApiError.rawBody.
  */
 export type ErrorBodyParser = (raw: unknown) => ErrorBodyContent;
 
 /**
- * Оставляет только строковые значения: контракт ApiError.fields
- * требует Record<string, string>. Нестроковые значения (массивы,
- * объекты) отбрасываются, полный оригинал остаётся в rawBody.
+ * Keeps only string values: ApiError.fields promises
+ * Record<string, string>. Non-string values are dropped, the full
+ * original stays in rawBody.
  *
  * @internal
  */
@@ -46,9 +37,7 @@ export function parseFields(raw: unknown): Record<string, string> | undefined {
 }
 
 /**
- * Дефолтный парсер. Извлекает code, message, fields из плоского
- * JSON-объекта; plain-text строка становится message. Незнакомые
- * поля остаются undefined, полное тело - в rawBody.
+ * Default parser: flat JSON object or plain-text string.
  *
  * @internal
  */

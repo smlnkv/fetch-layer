@@ -1,8 +1,7 @@
 /**
- * Вызов unref у таймера, если метод доступен. В Node это позволяет
- * процессу завершиться, не дожидаясь срабатывания таймера: короткая
- * CLI-утилита не висит полный timeoutMs после ответа. В браузере
- * setTimeout возвращает число, у которого unref нет.
+ * Calls unref on the timer if present. In Node this lets the process
+ * exit without waiting for the timer. In the browser setTimeout
+ * returns a number with no unref.
  */
 export function unrefTimer(timer: ReturnType<typeof setTimeout>): void {
   if (

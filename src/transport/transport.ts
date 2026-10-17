@@ -21,50 +21,57 @@ import type {
 const DEFAULT_TIMEOUT_MS = 10_000;
 
 /**
- * Подмножество полей ClientOptions для базового транспорта.
- * createClient передаёт сюда опции без слоёв и warn.
+ * ClientOptions fields for the base transport. createClient passes
+ * options here without layers and warn.
  *
  * @internal
  */
 export interface TransportOptions {
-  /** Базовый адрес сервера. */
+  /** Base address. */
   baseUrl: string;
 
-  /** Таймаут запроса в миллисекундах. По умолчанию 10000. */
+  /** Request timeout in milliseconds. Defaults to 10000. */
   timeoutMs?: number;
 
-  /** Функция fetch. По умолчанию глобальная. */
+  /** fetch function. Defaults to the global one. */
   fetch?: typeof fetch;
 
-  /** Режим отправки cookies. */
+  /** Cookie mode. */
   credentials?: RequestCredentials;
 
   /**
-   * Заголовки для всех запросов. Сливаются с per-request headers
-   * в самом низу pipeline: per-request и сгенерированные слоями
-   * заголовки переопределяют defaultHeaders.
+   * Headers for all requests. Merged with per-request headers at the
+   * bottom of the pipeline; per-request headers and headers from
+   * layers override defaultHeaders.
    */
   defaultHeaders?: HeadersInit;
 
-  /** Формат массивов в query-параметрах. */
+  /** Query array format. */
   queryArrayFormat?: QueryArrayFormat;
 
-  /** Формат объектов в query-параметрах. */
+  /** Query object format. */
   queryObjectFormat?: QueryObjectFormat;
 
   /**
-   * Кастомный парсер тела ошибки. По умолчанию используется
-   * плоский формат: { code, message, fields } или plain-text
-   * строка как message. Для нестандартных форматов приложение
-   * передаёт свой парсер.
+   * Custom error body parser. Defaults to flat shape:
+   * { code, message, fields } or a plain-text string as message.
    */
   parseErrorBody?: ErrorBodyParser;
 }
 
 /**
- * Создаёт базовую функцию запроса: fetch, разбор ответа,
- * нормализация ошибок. Принимает ResolvedRequestConfig: заголовки
- * уже нормализованы в Record.
+ * Accept header value for a response type. json and text get their
+ * MIME types, everything else falls back to * / *.
+ */
+function acceptFor(responseType: ResponseType): string {
+  if (responseType === 'json') return 'application/json';
+  if (responseType === 'text') return 'text/plain';
+  return '*/*';
+}
+
+/**
+ * Base request function: fetch, response parsing, error
+ * normalization. Takes ResolvedRequestConfig with headers in Record.
  */
 export function createBaseRequest(options: TransportOptions): RequestFn {
   const {
@@ -84,14 +91,13 @@ export function createBaseRequest(options: TransportOptions): RequestFn {
 
     const method = config.method ?? 'GET';
 
-    // Таймер поднимается до try: buildUrl и prepareBody тоже внутри
-    // try, а finally должен видеть timeout в любой ветке.
+    // Timer starts before try: buildUrl and prepareBody are inside
+    // try too, and finally must see timeout in any branch.
     const effectiveTimeoutMs = config.timeoutMs ?? defaultTimeoutMs;
     const timeout = setAbortTimeout(effectiveTimeoutMs);
 
-    // AbortSignal.any сохраняет причину сработавшего сигнала:
-    // таймаут остаётся TimeoutError, а не становится AbortError.
-    // cleanup не нужен: слушатели собираются сборщиком мусора.
+    // AbortSignal.any preserves the reason: timeout stays TimeoutError,
+    // not AbortError. Listeners are garbage collected, no cleanup needed.
     const signal = config.signal
       ? AbortSignal.any([config.signal, timeout.signal])
       : timeout.signal;
@@ -105,24 +111,19 @@ export function createBaseRequest(options: TransportOptions): RequestFn {
         config.queryObjectFormat ?? defaultObjectFormat,
       );
 
-      // У HEAD и OPTIONS тела нет, парсить как JSON нельзя.
+      // HEAD and OPTIONS have no body, cannot parse as JSON.
       const defaultResponseType: ResponseType =
         method === 'HEAD' || method === 'OPTIONS' ? 'text' : 'json';
       const responseType: ResponseType = config.responseType ?? defaultResponseType;
 
       const includeMeta = config.includeResponseMeta === true;
 
-      const defaultAccept =
-        responseType === 'json'
-          ? 'application/json'
-          : responseType === 'text'
-            ? 'text/plain'
-            : '*/*';
+      const defaultAccept = acceptFor(responseType);
 
-      // Порядок слияния: Accept -> defaultHeaders -> config.headers.
-      // Сгенерированные слоями заголовки (Idempotency-Key, Authorization)
-      // переопределяют defaultHeaders, поэтому случайный Idempotency-Key
-      // в defaultHeaders не сломает дедупликацию.
+      // Order: Accept -> defaultHeaders -> config.headers. Headers
+      // from layers (Idempotency-Key, Authorization) override
+      // defaultHeaders, so a stray Idempotency-Key in defaultHeaders
+      // does not break deduplication.
       const headers = mergeHeaders({ Accept: defaultAccept }, defaultHeaders, config.headers);
 
       const { body, contentType } = prepareBody(config.body);
@@ -143,14 +144,14 @@ export function createBaseRequest(options: TransportOptions): RequestFn {
         init.credentials = effectiveCredentials;
       }
 
-      // Потоковое тело (Web ReadableStream или Node.js stream.Readable)
-      // требует duplex: 'half'. Без него fetch выбрасывает TypeError.
+      // Streaming body requires duplex: 'half', without it fetch
+      // throws TypeError.
       if (isStreamingBody(body)) {
         (init as RequestInit & { duplex: 'half' }).duplex = 'half';
       }
 
-      // TypeError вокруг fetch означает сетевую ошибку. Только
-      // здесь: в остальных местах источник TypeError неизвестен.
+      // TypeError around fetch means network error. Only here:
+      // elsewhere the source is unknown.
       let response: Response;
       try {
         response = await fetchImpl(url, init);
@@ -165,8 +166,8 @@ export function createBaseRequest(options: TransportOptions): RequestFn {
         retryAfterMs: parseRetryAfterMs(response.headers.get('Retry-After')),
       };
 
-      // 204 и 304 - тела нет. Проверяем до response.ok так как
-      // 304 не входит в диапазон ok.
+      // 204 and 304 have no body. Checked before response.ok: 304
+      // is not in the ok range.
       if (response.status === 204 || response.status === 304) {
         if (includeMeta) {
           return { data: undefined, meta } as unknown as T;
@@ -191,9 +192,8 @@ export function createBaseRequest(options: TransportOptions): RequestFn {
         });
       }
 
-      // HEAD и OPTIONS возвращают только метаданные: тело, если
-      // сервер его прислал, отбрасывается. Тип ResponseWithMeta<undefined>
-      // у head/options в этом случае честный.
+      // HEAD and OPTIONS return only metadata: body is discarded
+      // even if server sent one.
       if (!response.body || method === 'HEAD' || method === 'OPTIONS') {
         if (includeMeta) {
           return { data: undefined, meta } as unknown as T;
@@ -209,9 +209,8 @@ export function createBaseRequest(options: TransportOptions): RequestFn {
 
       return data as T;
     } catch (e) {
-      // Всё, что не ApiError, нормализуется здесь. Внутри try
-      // уже выбрасываются ApiError (http, parse, network, timeout,
-      // abort), поэтому toApiError идемпотентен.
+      // ApiError (http, parse, network, timeout, abort) is thrown
+      // inside try, so toApiError is idempotent.
       throw toApiError(e);
     } finally {
       timeout.clear();

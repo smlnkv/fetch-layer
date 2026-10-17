@@ -1,27 +1,26 @@
 /**
- * Единственный формат HTTP-даты, разрешённый RFC 7231:
- * IMF-fixdate вида "Sun, 06 Nov 1994 08:49:37 GMT".
+ * The only HTTP date format allowed by RFC 7231: IMF-fixdate like
+ * "Sun, 06 Nov 1994 08:49:37 GMT".
  *
- * Полная проверка формы нужна, потому что Date.parse() в V8 слишком
- * либерален: '+5', ' 5 ', '-5 GMT', 'garbage GMT' он принимает как
- * валидные даты из далёкого прошлого. Тогда Retry-After превратился
- * бы в 0, и защита от шквала запросов пропала бы. Дни недели
- * и месяцы перечислены явно: RFC допускает только эти значения.
+ * Full shape check is needed: Date.parse() in V8 is too liberal.
+ * '+5', ' 5 ', '-5 GMT', 'garbage GMT' it accepts as valid dates
+ * from the distant past, Retry-After would turn into 0, and the
+ * protection against request floods would be gone. Weekdays and
+ * months are listed explicitly: RFC allows only these values.
  */
 const IMF_FIXDATE_RE =
   /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4} \d{2}:\d{2}:\d{2} GMT$/;
 
 /**
- * Миллисекунды до повтора или undefined, если заголовок пустой
- * и не разбирается.
+ * Milliseconds until retry, or undefined for empty and unparseable
+ * header.
  *
- * Функция только разбирает заголовок. Минимальную задержку
- * определяет withRetry. Числовой формат проверяется строго
- * (/^\d+$/), чтобы не пропустить '1e3', '0x10', '+5', '1.5' и другие
- * значения, которые Number молча принимает.
+ * The function only parses the header, minimum delay is set by
+ * withRetry. Numeric format is checked strictly (/^\d+$/): without
+ * this, '1e3', '0x10', '+5', '1.5' would pass as valid numbers.
  *
- * Leading и trailing OWS срезаются до проверок: RFC 7230 разрешает
- * пробелы вокруг значения заголовка.
+ * Leading and trailing OWS is trimmed before checks: RFC 7230
+ * allows spaces around header value.
  */
 export function parseRetryAfterMs(header: string | null): number | undefined {
   if (!header) return undefined;

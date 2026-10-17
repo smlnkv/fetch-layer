@@ -1,6 +1,6 @@
 /**
- * Для колбэков приложения (логгер, хуки): их падение не должно
- * ломать запрос. Вместо исключения возвращается undefined.
+ * For app callbacks (logger, hooks): a failure does not break the
+ * request. Returns undefined on error.
  */
 export function safeCall<T>(fn: () => T): T | undefined {
   try {

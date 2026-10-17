@@ -1,6 +1,6 @@
 /**
- * Минимальная задержка между повторами. Защищает от нулевой
- * задержки и от сервера, ответившего Retry-After: 0.
+ * Minimum delay between retries. Zero delay and Retry-After: 0
+ * are raised to MIN_RETRY_MS.
  */
 export const MIN_RETRY_MS = 100;
 
@@ -29,7 +29,7 @@ export function assertNonEmptyString(value: unknown, name: string): asserts valu
 }
 
 /**
- * Не даёт задержке стать меньше min. NaN и Infinity тоже дают min.
+ * Delay is at least min. NaN and Infinity return min.
  */
 export function clampDelay(ms: number, min: number): number {
   if (!Number.isFinite(ms)) return min;

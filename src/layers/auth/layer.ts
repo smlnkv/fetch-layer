@@ -15,74 +15,66 @@ const DEFAULT_CIRCUIT_BREAKER_MS = 5000;
 const DEFAULT_REFRESH_TIMEOUT_MS = 30_000;
 
 export interface AuthOptions {
-  /** Провайдер сессии. Обязателен. */
+  /** Required. */
   provider: SessionProvider;
 
   /**
-   * Вызывается при окончательном истечении сессии. Приложение само
-   * решает, что делать: показать модалку, сделать редирект, ничего.
-   *
-   * Исключения игнорируются: падение колбэка не подменяет исходную
-   * ошибку 401.
+   * Called on final session expiry. The app decides what to do:
+   * show a modal, redirect, nothing. Exceptions are ignored: a
+   * callback failure does not replace the original 401.
    */
   onSessionExpired?: (reason: SessionExpiredReason) => void;
 
   /**
-   * Длительность блокировки после временного сбоя обновления,
-   * в миллисекундах. По умолчанию 5000. Должна быть положительной.
+   * Blocking duration after a temporary refresh failure, in
+   * milliseconds. Defaults to 5000. Must be positive.
    *
-   * Используется в двух механизмах RefreshManager:
-   * - предохранитель: блокирует новые refresh после временного сбоя;
-   * - cooldown: блокирует повторный refresh сразу после успешного
-   *   обновления (защита от амплификации в pipeline
-   *   idempotency -> retry -> auth).
+   * Used by the breaker (blocks new refreshes after a failure) and
+   * by cooldown (blocks a second refresh right after a successful
+   * one).
    */
   circuitBreakerMs?: number;
 
   /**
-   * Таймаут одной попытки refresh, в миллисекундах. По умолчанию
-   * 30000. Провайдер получает AbortSignal и может передать его
-   * в свой fetch.
+   * Timeout of a single refresh attempt, in milliseconds. Defaults
+   * to 30000.
    *
-   * Если провайдер игнорирует signal, таймаут не сработает: fetch
-   * внутри провайдера продолжит выполняться. В этом случае
-   * ограничьте refresh на стороне SessionProvider.refresh.
+   * The provider gets an AbortSignal and may pass it to its fetch.
+   * If the signal is ignored, the library-side timeout does not
+   * fire: bound refresh in SessionProvider.refresh instead.
    */
   refreshTimeoutMs?: number;
 
   /**
-   * Вызывается, когда предохранитель обновления токена открывается.
-   * Предохранитель открывается после временного сбоя refresh и
-   * блокирует новые попытки на circuitBreakerMs миллисекунд.
+   * Called when the token refresh breaker opens. The breaker opens
+   * after a temporary refresh failure and blocks new attempts for
+   * circuitBreakerMs.
    */
   onCircuitOpen?: () => void;
 
   /**
-   * Вызывается, когда предохранитель закрывается. Закрывается либо
-   * по истечении circuitBreakerMs, либо вручную через
-   * resetRefreshCircuit(client).
+   * Called when the breaker closes. Closes either after
+   * circuitBreakerMs or manually via resetRefreshCircuit(client).
    */
   onCircuitClose?: () => void;
 }
 
 /**
- * Слой авторизации.
+ * Auth layer.
  *
- * Перед каждым запросом добавляет заголовки от provider. При 401
- * запускает обновление токена и повторяет исходный запрос один раз.
- * При временном сбое refresh пробрасывает ошибку, не разлогинивая
- * пользователя. При окончательном провале вызывает onSessionExpired.
+ * Adds headers from provider before each request. On 401 starts a
+ * token refresh and retries the original request once. On a temporary
+ * refresh failure rethrows the error without logging the user out. On
+ * a final failure calls onSessionExpired.
  *
- * Refresh запускается только при 401: 403 не инициирует обновление,
- * токен валиден, у пользователя просто нет доступа к ресурсу.
+ * Refresh starts only on 401: 403 does not trigger it.
  *
- * Если успешный refresh был меньше circuitBreakerMs назад, а запрос
- * снова получил 401, слой повторяет запрос с текущими заголовками
- * без нового refresh.
+ * If a successful refresh happened less than circuitBreakerMs ago and
+ * the request got 401 again, the layer retries with the current
+ * headers without a new refresh.
  *
- * Layer - шаблон: если один и тот же объект передан в два createClient,
- * каждый получит свой независимый RefreshManager. Менеджер создаётся
- * внутри wrap и передаётся в attach через state.
+ * Layer is a template: if the same object is passed to two
+ * createClient calls, each gets its own RefreshManager.
  */
 export function withAuth(options: AuthOptions): Layer {
   const {
@@ -136,10 +128,9 @@ export function withAuth(options: AuthOptions): Layer {
 
           throwIfAborted(config.signal);
 
-          // 401 получен внутри provider.refresh. Второй refresh
-          // через тот же SingleFlight вернул бы тот же промис
-          // и зациклил вызов. Пробрасываем 401 без onSessionExpired:
-          // решение о судьбе сессии принимает вызывающий код.
+          // 401 inside provider.refresh: a second refresh through
+          // SingleFlight would return the same promise and loop the
+          // call. Rethrow 401 without onSessionExpired.
           if (manager.isRefreshSignal(config.signal)) {
             safeCall(() =>
               context.warn?.(
@@ -153,8 +144,6 @@ export function withAuth(options: AuthOptions): Layer {
           const outcome = await manager.refresh(provider, circuitBreakerMs);
 
           if (outcome.status === 'temporarily-failed') {
-            // toApiError идемпотентен: RefreshManager уже нормализовал
-            // ошибку, повторный вызов вернёт тот же ApiError.
             throw toApiError(outcome.error);
           }
 
@@ -164,10 +153,8 @@ export function withAuth(options: AuthOptions): Layer {
             throw err;
           }
 
-          // cooldown: успешный refresh был меньше circuitBreakerMs
-          // назад. Повторяем с текущими заголовками без вызова
-          // refresh. Повторный 401 означает, что токен всё-таки
-          // отвергнут: сессия мертва, разлогиниваем как в success.
+          // cooldown: retry with current headers, no refresh. A
+          // second 401 means a dead session - same as success.
           if (outcome.status === 'cooldown') {
             throwIfAborted(config.signal);
             const currentHeaders = await safeGetAuthHeaders(provider);
@@ -189,9 +176,8 @@ export function withAuth(options: AuthOptions): Layer {
             }
           }
 
-          // success: повтор после успешного обновления. Заголовки
-          // берём из refresh, если они там есть: это устраняет гонку,
-          // когда реализация ещё не успела обновить своё состояние.
+          // success: retry with headers from refresh if present:
+          // closes the race when state is not updated yet.
           throwIfAborted(config.signal);
 
           const newHeaders = outcome.headers ?? (await safeGetAuthHeaders(provider));
@@ -204,7 +190,6 @@ export function withAuth(options: AuthOptions): Layer {
           } catch (retryError) {
             const retryErr = toApiError(retryError);
 
-            // Новый токен тоже отвергнут - сессия мертва.
             if (retryErr.status === 401) {
               safeClear(provider);
               safeCall(() => onSessionExpired?.('token-rejected'));
@@ -219,9 +204,6 @@ export function withAuth(options: AuthOptions): Layer {
     },
 
     attach(client, state): void {
-      // state - то, что wrap вернул для этого же клиента.
-      // Проверяем тип: unknown не даёт гарантий, даже если мы сами
-      // положили туда RefreshManager.
       if (!(state instanceof RefreshManager)) return;
       attachReset(client, () => state.reset());
     },
@@ -229,12 +211,9 @@ export function withAuth(options: AuthOptions): Layer {
 }
 
 /**
- * Падение getAuthHeaders превращается в ApiError с кодом
- * AUTH_PROVIDER_ERROR. Запрос не отправляется: явная ошибка
- * авторизации лучше, чем запрос без токена и 401 от сервера.
- *
- * AbortError пробрасывается как abort: это осознанная отмена,
- * а не сбой провайдера.
+ * A getAuthHeaders failure turns into ApiError with code
+ * AUTH_PROVIDER_ERROR: the request is not sent. AbortError is
+ * rethrown as abort.
  */
 async function safeGetAuthHeaders(provider: SessionProvider): Promise<Record<string, string>> {
   try {
@@ -259,13 +238,11 @@ async function safeGetAuthHeaders(provider: SessionProvider): Promise<Record<str
   }
 }
 
-/**
- * Падение clear не подменяет исходную ошибку 401.
- */
+/** A clear failure does not replace the original 401. */
 function safeClear(provider: SessionProvider): void {
   try {
     provider.clear?.();
   } catch {
-    // Падение clear не подменяет исходную ошибку.
+    // A clear failure does not replace the original error.
   }
 }

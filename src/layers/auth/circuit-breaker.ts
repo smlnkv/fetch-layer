@@ -7,12 +7,11 @@ export interface CircuitBreakerCallbacks {
 }
 
 /**
- * После временного сбоя блокирует новые попытки refresh на заданное
- * время. Без предохранителя каждый новый 401 запускал бы новую
- * попытку, и недоступный провайдер получал бы поток запросов.
+ * After a temporary failure blocks new refresh attempts for a given
+ * time: without the breaker, every new 401 would start a new attempt
+ * and the auth server would get a stream of requests.
  *
- * Колбэки onOpen и onClose вызываются ровно один раз на переход
- * состояния.
+ * onOpen and onClose are called exactly once per state transition.
  */
 export class CircuitBreaker {
   private openUntil = 0;
@@ -25,8 +24,8 @@ export class CircuitBreaker {
   }
 
   /**
-   * true, если предохранитель блокирует refresh. Если время
-   * блокировки истекло, закрывает и возвращает false.
+   * true if the breaker blocks refresh. If the blocking time has
+   * passed, closes and returns false.
    */
   isBlocking(): boolean {
     if (!this.isOpen) return false;
@@ -40,15 +39,15 @@ export class CircuitBreaker {
   }
 
   /**
-   * Открывает предохранитель на durationMs. Повторный вызов
-   * продлевает блокировку, но onOpen второй раз не вызывается.
+   * Opens the breaker for durationMs. A repeated call extends the
+   * blocking, onOpen is not called again.
    *
-   * В Node таймер не удерживает event loop (unref), чтобы процесс
-   * мог завершиться.
+   * In Node the timer does not hold the event loop (unref), so the
+   * process can exit.
    *
-   * @throws Error если durationMs не положительное число. Нулевая
-   *   или отрицательная длительность открыла бы предохранитель
-   *   сразу в закрытом состоянии.
+   * @throws Error if durationMs is not a positive number: a zero or
+   *   negative duration would open the breaker already in closed
+   *   state.
    */
   open(durationMs: number): void {
     if (!Number.isFinite(durationMs) || durationMs <= 0) {
@@ -74,9 +73,8 @@ export class CircuitBreaker {
   }
 
   /**
-   * Закрывает предохранитель и очищает таймер. Идемпотентно:
-   * повторный вызов на закрытом предохранителе ничего не делает
-   * и не вызывает onClose.
+   * Closes the breaker and clears the timer. Idempotent: a repeated
+   * call on a closed breaker does nothing and does not call onClose.
    */
   close(): void {
     if (!this.isOpen) return;

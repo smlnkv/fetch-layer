@@ -1,25 +1,22 @@
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS';
 
 /**
- * Формат разбора успешного ответа. Для text, blob, arrayBuffer
- * и stream трансформации не применяются: тело отдаётся как есть.
+ * Format for parsing successful responses. Defaults to json.
  *
- * - json: пустое тело даёт undefined, а не ошибку;
- * - text: для CSV, HTML, plain text;
- * - blob: бинарные данные с MIME-типом;
- * - arrayBuffer: бинарные данные без MIME-типа;
- * - stream: ReadableStream<Uint8Array>, для больших файлов и SSE.
+ * - json: empty body returns undefined, not an error;
+ * - text: CSV, HTML, plain text;
+ * - blob: binary data with a MIME type;
+ * - arrayBuffer: binary data without a MIME type;
+ * - stream: ReadableStream<Uint8Array>.
  */
 export type ResponseType = 'json' | 'text' | 'blob' | 'arrayBuffer' | 'stream';
 
-/**
- * Числа и boolean сериализуются в строку автоматически.
- */
+/** Numbers and booleans are stringified automatically. */
 export type QueryParamPrimitive = string | number | boolean;
 
 /**
- * Примитив, массив примитивов, вложенный объект или undefined/null
- * (параметр пропускается).
+ * Primitive, array of primitives, or nested object. undefined and
+ * null are skipped.
  */
 export type QueryParamValue =
   | QueryParamPrimitive
@@ -35,35 +32,31 @@ export interface QueryParamObject {
 export type QueryParams = Record<string, QueryParamValue>;
 
 /**
- * - repeat: ?ids=1&ids=2&ids=3. По умолчанию.
- * - brackets: ?ids[]=1&ids[]=2&ids[]=3.
- * - comma: ?ids=1,2,3.
+ * - repeat: ?ids=1&ids=2. Default.
+ * - brackets: ?ids[]=1&ids[]=2.
+ * - comma: ?ids=1,2.
  */
 export type QueryArrayFormat = 'repeat' | 'brackets' | 'comma';
 
 /**
- * - brackets: ?filter[status]=active. По умолчанию.
+ * - brackets: ?filter[status]=active. Default.
  * - dots: ?filter.status=active.
  */
 export type QueryObjectFormat = 'brackets' | 'dots';
 
 /**
- * HTTP-метаданные ответа. Возвращаются из requestWithMeta, head
- * и options.
+ * HTTP response metadata. Returned by requestWithMeta, head and
+ * options.
  */
 export interface ResponseMeta {
   status: number;
 
-  /** Заголовки ответа как стандартный Headers. */
   headers: Headers;
 
-  /** Значение X-Request-Id, если сервер его вернул. */
+  /** X-Request-Id, if server returned one. */
   requestId?: string;
 
-  /**
-   * Значение Retry-After в миллисекундах, если он был. Реальное
-   * значение заголовка, без ограничения сверху.
-   */
+  /** Retry-After in milliseconds, uncapped. */
   retryAfterMs?: number;
 }
 
@@ -73,93 +66,83 @@ export interface ResponseWithMeta<T> {
 }
 
 /**
- * Конфигурация одного запроса. Передаётся в Client.request. В методах
- * вида client.get поля path, method и body задаются самим методом
- * и не входят в RequestOptions.
+ * Request configuration. In shorthand methods like client.get,
+ * path, method and body are set by the method and are not part
+ * of RequestOptions.
  */
 export interface RequestConfig {
   /**
-   * Путь относительно baseUrl, например `/orders`. Только путь,
-   * без query-строки: параметры передаются через query.
+   * Path relative to baseUrl, e.g. `/orders`. Without a query
+   * string: pass params via query.
    *
-   * Пробелы и специальные символы внутри сегментов кодируются
-   * автоматически: `/users/John Doe` уйдёт как `/users/John%20Doe`.
+   * Segments are encoded automatically: `/users/John Doe` goes out
+   * as `/users/John%20Doe`.
    */
   path: string;
 
-  /** HTTP-метод. По умолчанию GET. */
+  /** Defaults to GET. */
   method?: HttpMethod;
 
   /**
-   * Тело запроса. Формат определяется по типу значения: JSON-объект
-   * или массив уходит как JSON, FormData как multipart/form-data,
-   * Blob как бинарные данные, ArrayBuffer и TypedArray как
-   * application/octet-stream, ReadableStream потоком, URLSearchParams
-   * как x-www-form-urlencoded, строка как есть.
+   * Body format is inferred from the type: JSON object and array
+   * are sent as JSON, FormData as multipart, Blob and File as
+   * binary data, ArrayBuffer and TypedArray as
+   * application/octet-stream, ReadableStream as a stream,
+   * URLSearchParams as form-urlencoded, string as is.
    *
-   * Если Content-Type задан явно, клиент его не перезаписывает.
+   * An explicit Content-Type is not overwritten.
    */
   body?: unknown;
 
   /**
-   * Заголовки запроса. Принимает Record, Headers или массив пар.
-   * Имена регистронезависимы. Внутри нормализуется в Record.
+   * Request headers: Record, Headers or an array of pairs. Header
+   * names are case-insensitive.
    */
   headers?: HeadersInit;
 
   query?: QueryParams;
 
   /**
-   * Сигнал отмены. Объединяется с внутренним таймаутом: срабатывает
-   * по первому из двух, с сохранением причины.
+   * Abort signal. Merged with the internal timeout: whichever fires
+   * first wins, the reason is preserved.
    */
   signal?: AbortSignal;
 
   /**
-   * Таймаут запроса в миллисекундах. Переопределяет timeoutMs
-   * клиента для этого запроса. Значение должно быть не меньше 100.
+   * Request timeout in ms. Overrides the client's timeoutMs for this
+   * request. Must be >= 100.
    */
   timeoutMs?: number;
 
   /**
-   * Пропустить добавление заголовков авторизации и обработку 401.
-   * Для запросов, которые создают сессию.
+   * Skip auth and 401 handling. For requests that create a session.
    */
   skipAuth?: boolean;
 
-  /** Пропустить автоматические повторы. */
+  /** Skip automatic retries. */
   skipRetry?: boolean;
 
-  /**
-   * Пропустить добавление заголовка идемпотентности: приложение
-   * само управляет ключом.
-   */
+  /** Skip adding idempotency header. */
   skipIdempotency?: boolean;
 
-  /** Явная область идемпотентности. По умолчанию "${method} ${path}". */
+  /** Explicit idempotency scope. Defaults to "${method} ${path}". */
   idempotencyScope?: string;
 
-  /** Формат разбора тела ответа. По умолчанию json. */
+  /** Format for parsing response body. Defaults to json. */
   responseType?: ResponseType;
 
-  /** Режим отправки cookies: omit, same-origin или include. */
+  /** Cookie mode: omit, same-origin or include. */
   credentials?: RequestCredentials;
 
-  /**
-   * Формат массивов в query. Переопределяет настройку клиента
-   * для конкретного запроса.
-   */
+  /** Query array format. Overrides the client setting. */
   queryArrayFormat?: QueryArrayFormat;
 
-  /**
-   * Формат объектов в query. Переопределяет настройку клиента
-   * для конкретного запроса.
-   */
+  /** Query object format. Overrides the client setting. */
   queryObjectFormat?: QueryObjectFormat;
 
   /**
-   * Дополнительные параметры для fetch. Поля method, headers, body,
-   * signal, credentials и duplex игнорируются.
+   * Extra fetch options. method, headers, body, signal, credentials
+   * and duplex are ignored.
    */
   fetchOptions?: Partial<
     Omit<RequestInit, 'method' | 'headers' | 'body' | 'signal' | 'credentials' | 'duplex'>
@@ -167,10 +150,10 @@ export interface RequestConfig {
 }
 
 /**
- * Конфиг с флагом возврата метаданных. Используется внутри
- * requestWithMeta, head и options: публичный RequestConfig его
- * не содержит, чтобы случайная передача из JS не давала
- * ResponseWithMeta там, где ожидается чистое тело.
+ * Config with response metadata flag. Used inside requestWithMeta,
+ * head and options: the public RequestConfig does not expose it,
+ * otherwise a stray call from JS could get ResponseWithMeta instead
+ * of a plain body.
  *
  * @internal
  */
@@ -179,21 +162,20 @@ export interface InternalRequestConfig extends RequestConfig {
 }
 
 /**
- * Внутренний конфиг: заголовки нормализованы в Record. Этот тип
- * получают слои и транспорт после того, как client.ts вызвал
- * mergeHeaders на публичном RequestConfig.
+ * Internal config: headers are normalized to Record. Layers and
+ * transport receive this type after client.ts called mergeHeaders
+ * on the public RequestConfig.
  */
 export interface ResolvedRequestConfig extends Omit<InternalRequestConfig, 'headers'> {
   headers?: Record<string, string>;
 
   /**
-   * Устанавливается withIdempotency. Свидетельствует, что к запросу
-   * применён ключ идемпотентности. withRetry читает маркер, чтобы
-   * решить, безопасен ли повтор мутирующего метода.
+   * Set by withIdempotency. withRetry reads the marker to decide
+   * whether retrying a mutating method is safe.
    *
-   * Поле заполняется и когда withIdempotency сгенерировал ключ,
-   * и когда приложение задало его вручную. headerName хранится
-   * для отладки, withRetry на него не опирается.
+   * The field is set both when withIdempotency generated a key and
+   * when the app sets it manually. headerName is for debugging,
+   * withRetry does not rely on it.
    *
    * @internal
    */
@@ -201,32 +183,26 @@ export interface ResolvedRequestConfig extends Omit<InternalRequestConfig, 'head
 }
 
 /**
- * RequestConfig без обязательных path, method и body. Используется
- * в методах вида client.get, где path и method задаются самим
- * методом, а body передаётся отдельным аргументом.
+ * RequestConfig without path, method and body. Used in shorthand
+ * methods like client.get.
  */
 export type RequestOptions = Omit<RequestConfig, 'path' | 'method' | 'body'>;
 
-/**
- * Низкоуровневая функция запроса, из которой строится pipeline.
- * Слои оборачивают друг друга: последний в массиве получает базовый
- * транспорт, каждый предыдущий - результат следующего.
- */
+/** Low-level request function that the pipeline is built from. */
 export type RequestFn = <T = unknown>(config: ResolvedRequestConfig) => Promise<T>;
 
 /**
- * HTTP-клиент. Создаётся функцией createClient.
+ * HTTP client. Created by createClient.
  *
- * get, post, put, patch, delete возвращают распарсенное тело.
- * head и options возвращают { data, meta }: тела у них нет,
- * метаданные - основной результат. requestWithMeta даёт доступ
- * к метаданным для любого HTTP-метода.
+ * get, post, put, patch, delete return parsed body. head and
+ * options return { data, meta }: no body, metadata is the main
+ * result. requestWithMeta exposes metadata for any HTTP method.
  */
 export interface Client {
-  /** Запрос с любым HTTP-методом. */
+  /** Request with any HTTP method. */
   request: <T = unknown>(config: RequestConfig) => Promise<T>;
 
-  /** Запрос с метаданными ответа: { data, meta }. */
+  /** Request with response metadata: { data, meta }. */
   requestWithMeta: <T = unknown>(config: RequestConfig) => Promise<ResponseWithMeta<T>>;
 
   get: <T = unknown>(path: string, options?: RequestOptions) => Promise<T>;
@@ -235,15 +211,14 @@ export interface Client {
   patch: <T = unknown>(path: string, body?: unknown, options?: RequestOptions) => Promise<T>;
 
   /**
-   * Принимает необязательное тело. HTTP-спецификация называет
-   * семантику тела в DELETE неопределённой, но многие API её
-   * поддерживают.
+   * Accepts an optional body. HTTP spec leaves DELETE body semantics
+   * undefined, but many APIs support it.
    */
   delete: <T = unknown>(path: string, body?: unknown, options?: RequestOptions) => Promise<T>;
 
-  /** Только заголовки. Тела нет, data всегда undefined. */
+  /** Headers only. data is always undefined. */
   head: (path: string, options?: RequestOptions) => Promise<ResponseWithMeta<undefined>>;
 
-  /** Доступные методы для ресурса. Тела нет, data всегда undefined. */
+  /** Allowed methods for a resource. data is always undefined. */
   options: (path: string, options?: RequestOptions) => Promise<ResponseWithMeta<undefined>>;
 }

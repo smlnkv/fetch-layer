@@ -1,11 +1,11 @@
 /**
- * Единый классификатор тела запроса. Транспорт по категории решает,
- * как подготовить тело для fetch; слой идемпотентности - можно ли
- * вычислить стабильный отпечаток.
+ * Request body classifier. Transport uses the category to decide
+ * how to prepare body for fetch; idempotency layer - whether a
+ * stable fingerprint can be computed.
  *
- * Проверки через Object.prototype.toString, а не instanceof:
- * instanceof не работает между realm, а тела часто приходят
- * из iframe или worker.
+ * Check via Object.prototype.toString, not instanceof: instanceof
+ * does not work across realms, and bodies often come from iframe
+ * or worker.
  */
 
 export type BodyKind =
@@ -20,24 +20,21 @@ export type BodyKind =
   | 'unsupported';
 
 /**
- * Категории, которые JSON.stringify превратил бы в {} или
- * в бессмысленное значение. Вложенные значения этих категорий
- * отклоняются в prepareJsonBody.
+ * Categories that JSON.stringify would turn into {} or a meaningless
+ * value. Nested values of these categories are rejected in
+ * prepareJsonBody.
  */
 export type UnsupportedKind = 'unsupported';
 
 /**
- * Blob и File обрабатываются одинаково, отдельная категория для
- * File не нужна: точное имя типа для сообщений об ошибках даёт
- * getTypeName.
+ * Anything not in the known categories is treated as json:
+ * primitives except string, arrays, plain objects, Date, BigInt.
+ * BigInt is rejected at JSON.stringify.
  *
- * Node.js stream.Readable не имеет собственного тега и требует
- * duck-typing: проверяются pipe, on и Symbol.asyncIterator.
- * Web ReadableStream под эту проверку не подходит: у него нет pipe.
- *
- * Всё, что не попало в известные категории, считается json:
- * примитивы (кроме строки), массивы, plain-объекты, Date, BigInt.
- * BigInt отклонится на этапе JSON.stringify.
+ * Blob and File are handled the same way. Node.js stream.Readable
+ * has no own tag and is detected by duck-typing: pipe, on,
+ * Symbol.asyncIterator. Web ReadableStream does not match: it has
+ * no pipe.
  */
 export function classifyBody(value: unknown): BodyKind {
   if (value === undefined || value === null) return 'undefined';
@@ -75,18 +72,16 @@ export function classifyBody(value: unknown): BodyKind {
 }
 
 /**
- * true для тел, которые можно стабильно сериализовать: отсутствие
- * тела, JSON-совместимые значения, строки. Используется слоем
- * идемпотентности и рекурсивной проверкой вложенных значений.
+ * true for undefined, json and string. Used by idempotency and by
+ * recursive check of nested values.
  */
 export function isSerializableKind(kind: BodyKind): boolean {
   return kind === 'undefined' || kind === 'json' || kind === 'string';
 }
 
 /**
- * true для типов, которые JSON.stringify превратил бы в {} на
- * верхнем уровне. Транспорт отклоняет их до отправки: без этой
- * проверки сервер получил бы пустой объект вместо данных.
+ * true for types that JSON.stringify would turn into {} already at
+ * the top level. Transport rejects them before sending.
  */
 export function isUnsupportedKind(kind: BodyKind): kind is UnsupportedKind {
   return kind === 'unsupported';
@@ -97,20 +92,18 @@ export function isSerializableBody(value: unknown): boolean {
 }
 
 /**
- * true для потоковых тел. Web ReadableStream и Node.js stream.Readable
- * одноразовые: после первой отправки повторный fetch выбросит
- * TypeError. Транспорт по этому признаку ставит duplex: 'half',
- * retry-слой отключает повторы.
+ * true for streaming bodies. Streams are single-use: a second fetch
+ * throws TypeError. Transport sets duplex: 'half' based on this flag,
+ * retry layer disables retries.
  */
 export function isStreamingBody(value: unknown): boolean {
   return classifyBody(value) === 'stream';
 }
 
 /**
- * Человекочитаемое имя типа для сообщений об ошибках. Опирается
- * на Symbol.toStringTag и duck-typing для Node.js stream.
- * Отдельная от BodyKind: категория описывает логику обработки,
- * имя - то, что увидит разработчик.
+ * Type name for error messages. Relies on Symbol.toStringTag and
+ * duck-typing for Node.js stream. Separate from BodyKind: category
+ * describes handling logic, name is what the developer sees.
  */
 export function getTypeName(value: unknown): string {
   if (isNodeReadable(value)) return 'NodeReadable';
@@ -120,7 +113,7 @@ export function getTypeName(value: unknown): string {
 interface NodeReadableLike {
   pipe: (...args: unknown[]) => unknown;
   on: (...args: unknown[]) => unknown;
-  [Symbol.asyncIterator]: () => AsyncIterator<unknown>;
+  [Symbol.asyncIterator](): AsyncIterator<unknown>;
 }
 
 function isNodeReadable(value: unknown): value is NodeReadableLike {

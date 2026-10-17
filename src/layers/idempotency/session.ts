@@ -10,62 +10,55 @@ import type { StorageLike } from '../../shared/storage';
 
 export interface SessionSourceOptions {
   /**
-   * Хранилище. Обычно sessionStorage, обёрнутый в fromWebStorage.
-   * В Node используется createMemoryStorage.
+   * Storage. Wrap localStorage and sessionStorage in fromWebStorage,
+   * use createMemoryStorage for Node.
    */
   storage: StorageLike;
 
-  /** Ключ объекта с записями в хранилище. По умолчанию idempotency:session. */
+  /** Key of the record object. Defaults to idempotency:session. */
   storageKey?: string;
 
   /**
-   * Генератор ключей. По умолчанию crypto.randomUUID. Можно
-   * подменить для тестов или нестандартных схем идентификаторов.
+   * Key generator. Defaults to crypto.randomUUID. Can be replaced
+   * for tests or non-standard schemes.
    */
   generateKey?: () => string;
 
   /**
-   * Максимум записей в хранилище, по умолчанию 100. При превышении
-   * удаляется самая старая по времени использования.
+   * Max entries, defaults to 100. When exceeded, the least recently
+   * used record is dropped.
    *
-   * Запись - это тройка (scope, query, отпечаток тела), поэтому один
-   * scope с разными телами занимает несколько записей.
+   * A record is a triple (scope, query, fingerprint): one scope with
+   * different bodies takes several.
    */
   maxEntries?: number;
 }
 
-/**
- * Ключ идемпотентности плюс время последнего использования - для
- * вытеснения при переполнении.
- */
 interface StoredEntry {
   key: string;
   lastUsedAt: number;
 }
 
 /**
- * Формат хранилища: JSON.stringify(scope)|query|bodyHash -> запись.
- * Scope экранируется через JSON.stringify, чтобы символ `|` внутри
- * scope не давал коллизий с разделителем. query - стабильный
- * отпечаток query-параметров, тоже JSON-строка.
+ * Storage format: JSON.stringify(scope)|query|bodyHash -> record.
+ * Scope is escaped via JSON.stringify, so `|` inside scope does not
+ * collide with the separator.
  */
 type Store = Record<string, StoredEntry>;
 
 /**
- * Источник ключей на базе синхронного хранилища. Все ключи живут
- * в одном JSON-объекте.
+ * Key source on top of a synchronous StorageLike.
  *
- * Если для тройки (scope, query, отпечаток тела) уже есть ключ,
- * возвращается он и обновляется время использования. Если тело
- * или query изменились, либо пары ещё нет - генерируется новый.
- * При success и definite-failure запись удаляется, при
- * indefinite-failure - сохраняется для повтора.
+ * If a key exists for the triple (scope, query, fingerprint), it is
+ * returned and its last-used time is updated. If the body or query
+ * changed, or the pair is new, a new key is generated. On success
+ * and definite-failure the record is deleted, on indefinite-failure
+ * it is kept for the retry.
  *
- * Для типовых хранилищ (sessionStorage, localStorage, память) лучше
- * готовые фабрики из fetch-layer/layers. createSessionSource нужен
- * для кастомных StorageLike.
+ * Ready factories for sessionStorage, localStorage and memory live
+ * in fetch-layer/layers.
  *
- * @throws Error если maxEntries меньше 1.
+ * @throws Error if maxEntries is below 1.
  */
 export function createSessionSource(options: SessionSourceOptions): IdempotencySource {
   const {
@@ -78,8 +71,8 @@ export function createSessionSource(options: SessionSourceOptions): IdempotencyS
   assertInteger(maxEntries, 'createSessionSource: maxEntries', 1);
 
   /**
-   * При повреждённых данных начинает с пустого объекта: это
-   * безопаснее, чем падать, ключ будет сгенерирован заново.
+   * On corrupt data starts from an empty object: the key will be
+   * generated anew.
    */
   const read = (): Store => {
     const raw = storage.getItem(storageKey);
@@ -96,9 +89,8 @@ export function createSessionSource(options: SessionSourceOptions): IdempotencyS
   };
 
   /**
-   * Если запись не удалась, выбрасывает ApiError с kind storage:
-   * клиент не должен отправлять запрос без возможности корректного
-   * повтора.
+   * On write error throws ApiError with kind storage: the client
+   * must not send a request without a way to retry correctly.
    */
   const write = (store: Store): void => {
     try {
@@ -114,12 +106,8 @@ export function createSessionSource(options: SessionSourceOptions): IdempotencyS
   };
 
   /**
-   * Возвращает null для несериализуемого тела: стабильный отпечаток
-   * невозможен, источник сгенерирует новый ключ без сохранения.
-   *
-   * Если stableSerialize не сможет сериализовать тело (циклическая
-   * ссылка, BigInt), выбросит ApiError с кодом
-   * BODY_SERIALIZATION_ERROR.
+   * null for a non-serializable body: a stable fingerprint is
+   * impossible, the source generates a new key without saving it.
    */
   const entryKey = (context: IdempotencyContext): string | null => {
     if (!isSerializableBody(context.body)) return null;
@@ -134,10 +122,6 @@ export function createSessionSource(options: SessionSourceOptions): IdempotencyS
     return parts.join('|');
   };
 
-  /**
-   * Пустая строка и whitespace-only считаются невалидным ключом,
-   * так же как в withIdempotency.
-   */
   const validateKey = (key: unknown): string => {
     if (typeof key !== 'string' || key.trim() === '') {
       throw new ApiError({
@@ -153,9 +137,9 @@ export function createSessionSource(options: SessionSourceOptions): IdempotencyS
     nextKey(context) {
       const key = entryKey(context);
 
-      // Для несериализуемого тела - новый ключ на каждый вызов,
-      // в хранилище не сохраняем: иначе повтор с другим телом
-      // того же типа мог бы переиспользовать ключ.
+      // For a non-serializable body a new key on every call, not
+      // stored: otherwise a retry with a different body of the same
+      // type could reuse the key.
       if (key === null) {
         return validateKey(generateKey());
       }
@@ -163,8 +147,8 @@ export function createSessionSource(options: SessionSourceOptions): IdempotencyS
       const store = read();
       const existing = store[key];
 
-      // Обновляем время использования, чтобы активный ключ
-      // не был вытеснен при переполнении.
+      // Refresh the last-used time so the active key is not evicted
+      // on overflow.
       if (existing) {
         store[key] = { key: existing.key, lastUsedAt: Date.now() };
         write(store);
@@ -190,9 +174,7 @@ export function createSessionSource(options: SessionSourceOptions): IdempotencyS
 
       const key = entryKey(context);
 
-      // Несериализуемое тело не записывалось, удалять нечего.
-      // Если тело стало несериализуемым между nextKey и resolve
-      // (мутация), запись останется до вытеснения по maxEntries.
+      // A non-serializable body was not stored, nothing to delete.
       if (key === null) return;
 
       const store = read();
@@ -205,10 +187,9 @@ export function createSessionSource(options: SessionSourceOptions): IdempotencyS
 }
 
 /**
- * Стабильный отпечаток query-параметров. undefined и null
- * пропускаются: они не попадают в URL, значит и на отпечаток
- * не влияют. Пустой результат (нет query или все значения
- * пропущены) означает, что query в отпечаток не включается.
+ * Query params fingerprint. undefined and null are skipped: they do
+ * not go into the URL and so do not affect the fingerprint. An empty
+ * result means query is not part of the fingerprint.
  */
 function serializeQueryForFingerprint(query: QueryParams | undefined): string {
   if (!query) return '';
@@ -227,9 +208,7 @@ function serializeQueryForFingerprint(query: QueryParams | undefined): string {
   return hasAny ? stableSerialize(filtered) : '';
 }
 
-/**
- * @throws Error если crypto.randomUUID недоступен.
- */
+/** @throws Error if crypto.randomUUID is not available. */
 function defaultGenerateKey(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();

@@ -6,8 +6,8 @@ import type {
 } from '../core/types';
 
 /**
- * Квадратные скобки [ и ] остаются читаемыми: filter[status]=active
- * вместо filter%5Bstatus%5D=active.
+ * Square brackets stay readable: filter[status]=active instead
+ * of filter%5Bstatus%5D=active.
  */
 function encodeQueryKey(key: string): string {
   return encodeURIComponent(key).replace(/%5B/g, '[').replace(/%5D/g, ']');
@@ -18,13 +18,11 @@ function encodeQueryValue(value: string): string {
 }
 
 /**
- * Кодирует path посегментно, сохраняя разделители /. Каждый сегмент
- * сначала декодируется, потом кодируется: это делает функцию
- * идемпотентной для уже закодированных сегментов (John%20Doe
- * не превращается в John%2520Doe).
+ * Encodes path per segment, keeping / separators. A segment is
+ * decoded first, then encoded: the function is idempotent for
+ * already encoded segments, John%20Doe does not become John%2520Doe.
  *
- * Если сегмент содержит невалидную escape-последовательность,
- * декодирование падает, и сегмент кодируется как есть.
+ * On invalid escape sequence the segment is encoded as is.
  */
 function encodePath(path: string): string {
   return path
@@ -45,11 +43,9 @@ function isQueryObject(value: QueryParamValue): value is { [key: string]: QueryP
 }
 
 /**
- * Сериализует одно значение в набор строк key=value. Рекурсивно
- * обходит вложенные объекты и массивы.
- *
- * undefined и null пропускаются, пустые массивы и объекты тоже.
- * Ключи объектов сортируются в алфавитном порядке.
+ * Serializes a single value into key=value strings. Recursively
+ * walks nested objects and arrays. undefined and null are skipped,
+ * empty arrays and objects too. Object keys are sorted alphabetically.
  */
 export function serializeQueryValue(
   key: string,
@@ -104,14 +100,11 @@ export function serializeQueryValue(
 }
 
 /**
- * Строит URL из baseUrl, path и query-параметров.
+ * Builds URL from baseUrl, path and query params.
  *
- * Ключи query-параметров сортируются в алфавитном порядке, включая
- * вложенные. Завершающие слеши у baseUrl снимаются, ведущий у path
- * тоже: /api/ + /users и /api + users дают /api/users.
- *
- * path кодируется посегментно: пробелы и специальные символы
- * внутри сегмента экранируются, разделители / сохраняются.
+ * Query param keys are sorted alphabetically, including nested ones.
+ * Trailing slashes on baseUrl are stripped, leading on path too:
+ * /api/ + /users and /api + users both give /api/users.
  */
 export function buildUrl(
   baseUrl: string,

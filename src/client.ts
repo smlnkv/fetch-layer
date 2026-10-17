@@ -18,37 +18,29 @@ import type {
 const MIN_TIMEOUT_MS = 100;
 
 /**
- * Публичная функция запроса: принимает InternalRequestConfig.
- * Внутренние методы (requestWithMeta, head, options) добавляют
- * includeResponseMeta перед вызовом. Публичный client.request
- * принимает RequestConfig без этого поля.
+ * Internal request function. Public client.request takes RequestConfig
+ * without includeResponseMeta.
  */
 type PublicRequestFn = <T = unknown>(config: InternalRequestConfig) => Promise<T>;
 
-/** Настройки клиента: все поля TransportOptions плюс warn и layers. */
+/** Client options: TransportOptions plus warn and layers. */
 export interface ClientOptions extends TransportOptions {
   /**
-   * Приёмник предупреждений о неверном использовании API.
-   * По умолчанию console.warn. Передайте null, чтобы отключить.
+   * Where misuse warnings go. Defaults to console.warn, null disables.
    */
   warn?: ((message: string) => void) | null;
 
   /**
-   * Слои клиента. Применяются снаружи внутрь: первый в массиве
-   * оборачивает все последующие, последний получает базовый транспорт.
-   *
-   * Встроенные слои идут в порядке withIdempotency -> withRetry ->
-   * withAuth. Порядок валидируется при создании клиента.
-   *
-   * Если не заданы, клиент работает без слоёв.
+   * Client layers. Empty by default. Order and stage are described
+   * in Layer.
    */
   layers?: readonly Layer[];
 }
 
 /**
- * Приводит публичный RequestConfig к внутреннему виду: заголовки
- * нормализуются в Record. undefined остаётся undefined, чтобы
- * слои не видели пустой объект вместо отсутствия заголовков.
+ * Converts public RequestConfig to internal shape: headers are
+ * normalized to Record. undefined stays undefined, so layers do not
+ * see an empty object instead of missing headers.
  */
 function resolveConfig(config: InternalRequestConfig): ResolvedRequestConfig {
   return {
@@ -58,9 +50,8 @@ function resolveConfig(config: InternalRequestConfig): ResolvedRequestConfig {
 }
 
 /**
- * Единая проверка timeoutMs: значение должно быть числом не меньше
- * MIN_TIMEOUT_MS. Отдельная от assertPositiveNumber, потому что
- * та даёт другое сообщение и другой порог.
+ * Validates timeoutMs: number >= MIN_TIMEOUT_MS. Separate from
+ * assertPositiveNumber: different threshold and message.
  */
 function assertTimeout(value: unknown, prefix: string): asserts value is number {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < MIN_TIMEOUT_MS) {
@@ -71,12 +62,24 @@ function assertTimeout(value: unknown, prefix: string): asserts value is number 
 }
 
 /**
- * Собирает pipeline из базового транспорта и слоёв, валидирует
- * порядок.
+ * undefined means console.warn, null disables, a function is used
+ * as is.
  *
- * @throws Error если конфигурация некорректна: пустой baseUrl,
- *   невалидный или слишком маленький timeoutMs, недоступный fetch,
- *   нарушение порядка слоёв, дубликаты имён, дубликаты stage.
+ * The default is wrapped in an arrow function: console.warn as a
+ * method depends on `this`, and the pipeline calls it without context.
+ */
+function resolveWarn(value: ClientOptions['warn']): ((message: string) => void) | undefined {
+  if (value === undefined) return (message) => console.warn(message);
+  if (value === null) return undefined;
+  return value;
+}
+
+/**
+ * Builds the pipeline from base transport and layers, validates
+ * order.
+ *
+ * @throws Error on invalid config: empty baseUrl, invalid or too
+ *   small timeoutMs, unavailable fetch, layer order violation.
  */
 export function createClient(options: ClientOptions): Client {
   validateOptions(options);
@@ -85,8 +88,7 @@ export function createClient(options: ClientOptions): Client {
 
   validateLayerOrder(layers);
 
-  // null отключает предупреждения; undefined - console.warn по умолчанию.
-  const warn = options.warn === undefined ? console.warn : (options.warn ?? undefined);
+  const warn = resolveWarn(options.warn);
 
   const context: LayerContext = {
     warn,
@@ -106,9 +108,9 @@ export function createClient(options: ClientOptions): Client {
         assertTimeout(resolved.timeoutMs, 'client');
       }
 
-      // Нормализуем метод до верхнего регистра: слои (withIdempotency,
-      // withRetry) сравнивают его со строками 'POST', 'PUT' и другими.
-      // Fetch нормализует сам, но слои получают конфиг до fetch.
+      // Method is uppercased: layers (withIdempotency, withRetry)
+      // compare it to POST, PUT and others. Fetch normalizes anyway,
+      // but layers get the config before fetch.
       finalConfig = {
         ...resolved,
         method: (resolved.method ?? 'GET').toUpperCase() as HttpMethod,
@@ -122,9 +124,9 @@ export function createClient(options: ClientOptions): Client {
       });
     }
 
-    // Ошибка из пользовательского слоя может быть не ApiError.
-    // Контракт: всё, что выбрасывается наружу, нормализовано.
-    // toApiError идемпотентен, для ошибок транспорта вернёт тот же объект.
+    // Custom layers may throw errors other than ApiError. Contract:
+    // everything thrown by the client is normalized. toApiError is
+    // idempotent and returns the same object for transport errors.
     try {
       return await pipeline<T>(finalConfig);
     } catch (e) {
@@ -139,8 +141,7 @@ export function createClient(options: ClientOptions): Client {
 }
 
 /**
- * Ошибка конфигурации обнаруживается при создании клиента,
- * а не при первом запросе.
+ * Validation at client creation, not at first request.
  */
 function validateOptions(options: ClientOptions): void {
   assertNonEmptyString(options.baseUrl, 'createClient: baseUrl');
@@ -158,10 +159,6 @@ function validateOptions(options: ClientOptions): void {
   }
 }
 
-/**
- * Сокращённые методы (get, post и другие) вызывают функцию запроса
- * с добавленными path, method и body.
- */
 function makeBodyless(request: PublicRequestFn, method: HttpMethod) {
   return <T>(path: string, options?: RequestOptions): Promise<T> =>
     request<T>({ ...options, path, method });

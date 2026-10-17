@@ -1,17 +1,18 @@
 import type { Client, RequestFn } from './types';
 
 /**
- * Контекст, который createClient передаёт каждому слою при сборке
- * pipeline. Относится к клиенту в целом, а не к конкретному слою.
+ * Context that createClient passes to every layer when building the
+ * pipeline. Shared by all client layers.
  */
 export interface LayerContext {
   readonly warn?: (message: string) => void;
 }
 
 /**
- * fn - обёрнутая функция запроса. state - произвольное значение,
- * которое слой сохраняет до вызова attach. Слой сам знает, что
- * положил, и сам проверяет state перед использованием.
+ * fn is the request function produced by this layer. state - a value
+ * the layer saves until attach: this is how a layer ties its state
+ * to a specific client, even if the same Layer is used across
+ * several clients.
  */
 export interface LayerWrapResult {
   fn: RequestFn;
@@ -19,69 +20,50 @@ export interface LayerWrapResult {
 }
 
 /**
- * Слой клиента. Слои передаются в ClientOptions.layers в порядке
- * снаружи внутрь: первый в массиве оборачивает все последующие,
- * последний получает базовый транспорт.
+ * Layer. Passed to ClientOptions.layers from the outside in: the
+ * first in the array wraps all subsequent layers, the last receives
+ * the base transport.
  */
 export interface Layer {
   /**
-   * Используется в сообщениях об ошибках валидации порядка.
-   * Для встроенных слоёв совпадает с именем фабрики (например,
-   * withAuth).
-   *
-   * Имена должны быть уникальны: дубликат приводит к ошибке
-   * при создании клиента.
+   * Name used in validation error messages. Must be unique: a
+   * duplicate fails client creation. For built-ins it matches the
+   * factory name.
    */
   readonly name: string;
 
   /**
-   * Приоритет слоя: чем больше значение, тем снаружи слой. Слои
-   * в ClientOptions.layers должны идти по убыванию stage.
-   *
-   * Если не задан, слой считается самым внутренним и не участвует
-   * в проверке порядка. Встроенные значения: withIdempotency: 3,
-   * withRetry: 2, withAuth: 1.
-   *
-   * Для кастомного слоя между встроенными используйте дробные
-   * значения: 2.5 - между withIdempotency и withRetry,
-   * 1.5 - между withRetry и withAuth.
+   * Priority: higher means further outside. Layers must go in
+   * descending stage order. If omitted, the layer skips order
+   * validation. Built-ins: withIdempotency: 3, withRetry: 2,
+   * withAuth: 1. To insert between built-ins: 2.5 - between
+   * withIdempotency and withRetry, 1.5 - between withRetry
+   * and withAuth.
    */
   readonly stage?: number;
 
   /**
-   * Оборачивает следующую функцию в pipeline. Вызывается изнутри
-   * наружу: последний слой в массиве получает базовый транспорт,
-   * каждый предыдущий - результат следующего.
-   *
-   * Контекст собирается один раз и передаётся всем слоям. state
-   * сохраняется рядом с pipeline и возвращается в attach этого же
-   * слоя - так слой связывает своё состояние с конкретным клиентом,
-   * даже если один и тот же Layer используется в нескольких клиентах.
+   * Wraps the next function in the pipeline. Called from the inside
+   * out: the last layer in the array receives the base transport.
+   * state is passed back to the same layer's attach.
    */
   wrap(next: RequestFn, context: LayerContext): LayerWrapResult;
 
   /**
-   * Вызывается после создания клиента. Для сервисных функций,
-   * которым нужен сам клиент (например, resetRefreshCircuit).
-   *
-   * state - то, что этот же слой вернул из wrap для данного клиента.
-   *
-   * Исключение из attach прерывает createClient. Сообщение об
-   * ошибке включает имя слоя.
+   * Called after client creation. For service functions that need
+   * the client itself (resetRefreshCircuit). state is what wrap
+   * returned for this client. An exception aborts createClient;
+   * the message includes the layer name.
    */
   attach?(client: Client, state: unknown): void;
 }
 
 /**
- * Слои без stage пропускаются: они не навязывают порядок и могут
- * стоять в любой позиции массива.
+ * Layers without stage are skipped.
  *
- * Проверяет три вещи:
- * - уникальность имён слоёв: дубликат приводит к ошибке;
- * - убывание stage: слои идут снаружи внутрь;
- * - дубликаты stage: два слоя с одинаковым stage дают ошибку,
- *   потому что порядок между ними определяется позицией
- *   в массиве, а это неявно.
+ * Checks name uniqueness, descending stage, and no duplicate stages:
+ * with equal stage the order would be determined by position in the
+ * array, which is implicit.
  *
  * @internal
  */
@@ -138,10 +120,8 @@ export function validateLayerOrder(layers: readonly Layer[]): void {
 }
 
 /**
- * Применяет слои изнутри наружу: последний в массиве получает
- * базовую функцию, каждый предыдущий оборачивает результат
- * следующего. Возвращает pipeline и массив state, где state[i]
- * соответствует layers[i].
+ * Applies layers from the inside out. state[i] corresponds to
+ * layers[i].
  *
  * @internal
  */
@@ -163,12 +143,9 @@ export function applyLayers(
 }
 
 /**
- * Порядок вызова совпадает с порядком в массиве. state берётся
- * из соответствующей позиции.
- *
- * Падение attach прерывает createClient. Ошибка включает имя слоя,
- * чтобы приложение знало, кто именно сломал создание клиента.
- * Оригинальное исключение доступно через cause.
+ * Call order matches array order, state comes from the same
+ * position. If attach throws, createClient aborts; the error
+ * includes the layer name.
  *
  * @internal
  */
